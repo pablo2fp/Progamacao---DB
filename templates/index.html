@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Programação Mensal</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 30px; background-color: #f4f7f6; }
+        form, table { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        input, select, textarea { width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
+        button { background-color: #28a745; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; border-bottom: 1px solid #ddd; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        .btn-editar { background-color: #ffc107; color: black; padding: 5px 10px; text-decoration: none; border-radius: 4px; }
+        .filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items: end; }
+        .filtros label { display: block; }
+        .filtros button, .filtros a { display: inline-block; padding: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div>
+        Logado como <strong>{{ user.username }}</strong>
+        {% if user.role == 'admin' %}<strong>(Administrador)</strong>{% endif %}
+        <form action="{{ url_for('logout') }}" method="POST" style="display: inline; box-shadow: none; padding: 0;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Sair</button>
+        </form>
+    </div>
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
+        {% endif %}
+    {% endwith %}
+
+    <h2>Nova Programação</h2>
+    <form action="{{ url_for('add') }}" method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label>Nome do técnico:</label>
+        <input type="text" name="nome" required>
+
+        <label>Matricula</label>
+        <input type="text" name="matricula" required>
+
+        <label>Escritório:</label>
+        <select name="escritorio" required>
+            <option value="">Selecione um escritório</option>
+            <option value="Abaiara">Abaiara</option>
+            <option value="Altaneira">Altaneira</option>
+            <option value="Barbalha">Barbalha</option>
+            <option value="Caririaçu">Caririaçu</option>
+            <option value="Crato">Crato</option>
+            <option value="Crato - Regional">Crato - Regional</option>
+            <option value="Farias Brito">Farias Brito</option>
+            <option value="Granjeiro">Granjeiro</option>
+            <option value="Jardim">Jardim</option>
+            <option value="Juazeiro do Norte">Juazeiro do Norte</option>
+            <option value="Missão Velha">Missão Velha</option>
+            <option value="Nova Olinda">Nova Olinda</option>
+            <option value="Santana do Cariri">Santana do Cariri</option>
+            <option value="Várzea Alegre">Várzea Alegre</option>
+        </select>
+
+        <label>Data:</label>
+        <input type="date" name="data_trabalho" required>
+        
+        <label>Atividade:</label>
+        <textarea name="atividade" required></textarea>
+        
+        <button type="submit">Agendar Trabalho</button>
+    </form>
+
+    <h2>Escala Mensal</h2>
+    <form action="{{ url_for('index') }}" method="GET" class="filtros">
+        <div>
+            <label for="q">Buscar</label>
+            <input id="q" type="search" name="q" value="{{ filtros.q }}" placeholder="Nome, matrícula ou atividade">
+        </div>
+        <div>
+            <label for="filtro-escritorio">Escritório</label>
+            <select id="filtro-escritorio" name="escritorio">
+                <option value="">Todos</option>
+                {% for item in escritorios %}
+                <option value="{{ item.escritorio }}" {% if filtros.escritorio == item.escritorio %}selected{% endif %}>{{ item.escritorio }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="filtro-status">Status</label>
+            <select id="filtro-status" name="status">
+                <option value="">Todos</option>
+                {% for item in statuses %}
+                <option value="{{ item.status }}" {% if filtros.status == item.status %}selected{% endif %}>{{ item.status }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="data-inicio">Data inicial</label>
+            <input id="data-inicio" type="date" name="data_inicio" value="{{ filtros.data_inicio }}">
+        </div>
+        <div>
+            <label for="data-fim">Data final</label>
+            <input id="data-fim" type="date" name="data_fim" value="{{ filtros.data_fim }}">
+        </div>
+        <div>
+            <button type="submit">Filtrar</button>
+            <a href="{{ url_for('index') }}">Limpar</a>
+        </div>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Data</th>
+                <th>Escritório </th>
+                <th>Nome do técnico</th>
+                <th>Matricula</th>
+                <th>Atividade</th>
+                <th>Status</th>
+                <th>Criado em</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in programacoes %}
+            <tr>
+                <td>{{ p.data_trabalho }}</td>
+                <td>{{ p.escritorio }} </td>
+                <td>{{ p.nome }}</td>
+                <td>{{ p.matricula }}</td>
+                <td>{{ p.atividade }}</td>
+                <td><strong>{{ p.status }}</strong></td>
+                <td>{{ p.data_criacao }}</td>
+                <td>
+                    {% if user.role == 'admin' or p.usuario_id == user.id %}
+                    <a class="btn-editar" href="{{ url_for('edit', id=p.id) }}">Modificar</a>
+                    <form action="{{ url_for('delete', id=p.id) }}" method="POST" style="display: inline; box-shadow: none; padding: 0;">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit">Excluir</button>
+                    </form>
+                    {% else %}
+                    Somente leitura
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8">Nenhuma programação corresponde aos filtros.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+</body>
+</html>
