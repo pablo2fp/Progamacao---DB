@@ -1,8 +1,8 @@
-Sistema de Programação Mensal
+# Sistema de Programação Mensal
 
 Uma aplicação web desenvolvida em Python com o microframework Flask para gerenciar a escala e as atividades mensais de técnicos em diversos escritórios. O sistema permite o cadastro de atividades, filtros avançados de busca e conta com um sistema de autenticação e permissões de usuários (Comum e Administrador).
 
-🚀 Funcionalidades
+## 🚀 Funcionalidades
 
 Autenticação Segura: Registro e login de usuários com senhas criptografadas (hashes).
 
@@ -14,7 +14,7 @@ Filtros de Busca: Pesquisa por texto (nome, matrícula, atividade), por escritó
 
 Segurança Integrada: Proteção contra ataques CSRF nativa em todos os formulários.
 
-🛠️ Tecnologias Utilizadas
+## 🛠️ Tecnologias Utilizadas
 
 Backend: Python 3.x, Flask
 
@@ -24,61 +24,73 @@ Frontend: HTML5, CSS3, Jinja2 (Templates)
 
 Segurança: Werkzeug (Hashes de senha), tokens CSRF customizados.
 
-⚙️ Configuração e Execução Local
+## ⚙️ Configuração e Execução Local
 
 Siga os passos abaixo para rodar o projeto na sua máquina local:
 
-1. Clone o repositório
+### 1. Clone o repositório
 
+``` text
 git clone https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
 cd SEU_REPOSITORIO
+``` 
 
 
-2. Crie um Ambiente Virtual (Recomendado)
-
+### 2. Crie um Ambiente Virtual (Recomendado)
+``` text
 python -m venv venv
-# No Windows:
+```
+
+#### No Windows:
+``` text
 venv\Scripts\activate
-# No Linux/Mac:
+```
+
+#### No Linux/Mac:
+```text
 source venv/bin/activate
+```
 
 
-3. Instale as Dependências
+### 3. Instale as Dependências
 
 Como o projeto utiliza Flask, instale-o via pip:
-
+```text
 pip install Flask Werkzeug
-
+```
 
 (Dica: Considere criar um arquivo requirements.txt com o comando pip freeze > requirements.txt)
 
-4. Configure as Variáveis de Ambiente
+### 4. Configure as Variáveis de Ambiente
 
 Crie um arquivo .env na raiz do projeto (ou exporte no seu terminal) com as seguintes variáveis obrigatórias:
 
-# Chave secreta para sessões e CSRF (OBRIGATÓRIO)
+#### Chave secreta para sessões e CSRF (OBRIGATÓRIO)
 FLASK_SECRET_KEY=uma_chave_muito_segura_e_aleatoria_aqui
 
-# Ativa o modo de desenvolvimento local (0 = Produção, 1 = Desenvolvimento)
+#### Ativa o modo de desenvolvimento local (0 = Produção, 1 = Desenvolvimento)
 FLASK_DEBUG=1
 
-# Configura cookies seguros para HTTPS (0 = HTTP, 1 = HTTPS)
+#### Configura cookies seguros para HTTPS (0 = HTTP, 1 = HTTPS)
 FLASK_HTTPS_ONLY=0
 
-# Define o nome de um usuário administrador padrão (Opcional)
+#### Define o nome de um usuário administrador padrão (Opcional)
 FLASK_ADMIN_USERNAME=admin
 
 
 🚨 IMPORTANTE: Nunca faça o commit do seu arquivo .env ou do banco de dados programacao.db para o GitHub. Certifique-se de que eles estejam listados no seu arquivo .gitignore.
 
-5. Inicie a Aplicação
-
+### 5. Inicie a Aplicação
+```text
 python app.py
+```
+#### Acesse:
+```text
+http://localhost:5000 no seu navegador.
+```
+O banco de dados SQLite (programacao.db) será inicializado automaticamente na primeira execução.
 
-
-Acesse http://localhost:5000 no seu navegador. O banco de dados SQLite (programacao.db) será inicializado automaticamente na primeira execução.
-
-☁️ Recomendações para Deploy em Nuvem (Produção)
+## ☁️ Recomendações para Deploy em Nuvem (Produção)
 
 Se você planeja hospedar este projeto em plataformas como Render, Heroku, AWS ou Google Cloud, preste atenção aos seguintes pontos críticos:
 
