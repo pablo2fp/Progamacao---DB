@@ -54,12 +54,10 @@ source venv/bin/activate
 
 ### 3. Instale as Dependências
 
-Como o projeto utiliza Flask, instale-o via pip:
+Instale todas as dependências do projeto:
 ```text
-pip install Flask Werkzeug
+pip install -r requirements.txt
 ```
-
-(Dica: Considere criar um arquivo requirements.txt com o comando pip freeze > requirements.txt)
 
 ### 4. Configure as Variáveis de Ambiente
 
@@ -90,12 +88,38 @@ http://localhost:5000 no seu navegador.
 ```
 O banco de dados SQLite (programacao.db) será inicializado automaticamente na primeira execução.
 
-## ☁️ Recomendações para Deploy em Nuvem (Produção)
+## ☁️ Deploy em Nuvem (Produção)
 
-Se você planeja hospedar este projeto em plataformas como Render, Heroku, AWS ou Google Cloud, preste atenção aos seguintes pontos críticos:
+O projeto agora aceita PostgreSQL em produção e continua funcionando com SQLite em desenvolvimento local. O comportamento é automático:
 
-Banco de Dados: Sistemas de nuvem costumam usar sistemas de arquivos efêmeros. Isso significa que o SQLite (programacao.db) perderá todos os dados a cada reinício do servidor. É altamente recomendável migrar para um banco de dados externo como PostgreSQL ou MySQL em produção.
+- Se `DATABASE_URL` estiver definido e não começar com `sqlite`, o app usa PostgreSQL.
+- Se `DATABASE_URL` não estiver definido, o app usa o arquivo local `programacao.db`.
 
-HTTPS: Em produção, certifique-se de acessar o site via HTTPS e defina a variável FLASK_HTTPS_ONLY=1 nas configurações da sua nuvem para garantir a segurança dos cookies de sessão.
+### Variáveis obrigatórias em produção
 
-Debug Mode: Nunca deixe FLASK_DEBUG=1 em produção, pois isso pode expor seu código-fonte e dados sensíveis a visitantes em caso de erro.
+```text
+FLASK_SECRET_KEY=sua_chave_super_segura
+FLASK_DEBUG=0
+FLASK_HTTPS_ONLY=1
+DATABASE_URL=postgresql://usuario:senha@host:5432/nome_do_banco
+FLASK_ADMIN_USERNAME=admin
+```
+
+### Executando com Gunicorn
+
+Em ambiente cloud, o ideal é utilizar Gunicorn:
+
+```bash
+gunicorn --bind 0.0.0.0:$PORT app:app
+```
+
+### Boas práticas
+
+- Use PostgreSQL gerenciado em produção para garantir persistência.
+- Nunca deixe `FLASK_DEBUG=1` em produção.
+- Configure a aplicação por trás de HTTPS e mantenha a `FLASK_SECRET_KEY` fora do controle de versão.
+- Em serviços com proxy/reverse proxy, o app já usa `ProxyFix` para tratar corretamente os headers de HTTPS.
+
+### Observação importante
+
+O SQLite é adequado para desenvolvimento local, mas não é recomendado como banco primário em produção em nuvem, pois arquivos locais podem ser apagados ou reinicializados entre deploys.

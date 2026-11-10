@@ -1,11 +1,9 @@
 import hmac
 import os
 import secrets
+import sqlite3
 from datetime import date
 from functools import wraps
-
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
 from flask import (
     Flask,
@@ -18,26 +16,54 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
-if not app.config['SECRET_KEY']:
-    raise RuntimeError(
-        'Defina a variável de ambiente FLASK_SECRET_KEY antes de iniciar o app.'
-    )
+if os.environ.get('FLASK_ENV') == 'production' or os.environ.get('DATABASE_URL'):
+    app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY')
+    if not app.config['SECRET_KEY']:
+        raise RuntimeError(
+            'Defina a variável de ambiente FLASK_SECRET_KEY antes de iniciar o app em produção.'
+        )
+else:
+    app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-me')
+
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_HTTPS_ONLY') == '1'
-DB_FILE = 'programacao.db'
+app.config['PREFERRED_URL_SCHEME'] = 'https' if app.config['SESSION_COOKIE_SECURE'] else 'http'
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, 'programacao.db')
+
+
+def is_postgres_db():
+    database_url = os.environ.get('DATABASE_URL', '').strip()
+    return bool(database_url) and not database_url.startswith('sqlite')
 
 
 def get_db_connection():
-    return psycopg2.connect(os.environ.get('DATABASE_URL'))
+    database_url = os.environ.get('DATABASE_URL', '').strip()
+    if database_url and not database_url.startswith('sqlite'):
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        conn.autocommit = False
+        return conn
+
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def execute_query(conn, query, params=None):
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    if is_postgres_db():
+        from psycopg2.extras import RealDictCursor
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(query.replace('?', '%s'), params or ())
+        return cursor
+
+    cursor = conn.cursor()
     cursor.execute(query, params or ())
     return cursor
 
@@ -45,48 +71,23 @@ def execute_query(conn, query, params=None):
 def init_db():
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
-        cursor.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
-                data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            '''
-        )
-        cursor.execute(
-            '''
-            CREATE TABLE IF NOT EXISTS programacao (
-                id SERIAL PRIMARY KEY,
-                nome TEXT NOT NULL,
-                matricula INTEGER NOT NULL,
-                escritorio TEXT NOT NULL,
-                data_trabalho DATE NOT NULL,
-                atividade TEXT NOT NULL,
-                status TEXT DEFAULT 'Planejado',
-                data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                usuario_id INTEGER REFERENCES usuarios(id)
-            )
-            '''
-        )
-
-        cursor.execute(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = 'programacao'
-            """
-        )
-        columns = {row['column_name'] for row in cursor.fetchall()}
-
-        if columns == {'id', 'titulo', 'descricao'}:
-            cursor.execute('ALTER TABLE programacao RENAME TO programacao_legacy')
-            cursor.execute(
+        if is_postgres_db():
+            execute_query(
+                conn,
                 '''
-                CREATE TABLE programacao (
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            execute_query(
+                conn,
+                '''
+                CREATE TABLE IF NOT EXISTS programacao (
                     id SERIAL PRIMARY KEY,
                     nome TEXT NOT NULL,
                     matricula INTEGER NOT NULL,
@@ -99,56 +100,185 @@ def init_db():
                 )
                 '''
             )
-            cursor.execute(
-                '''
-                INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade)
-                SELECT id, titulo, 0, '', descricao, '' FROM programacao_legacy
-                '''
-            )
-            cursor.execute('DROP TABLE programacao_legacy')
-            cursor.execute(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = 'programacao'
-                """
-            )
-            columns = {row['column_name'] for row in cursor.fetchall()}
-
-        missing_columns = {
-            'matricula': "INTEGER NOT NULL DEFAULT 0",
-            'escritorio': "TEXT NOT NULL DEFAULT ''",
-            'status': "TEXT DEFAULT 'Planejado'",
-            'data_criacao': 'TIMESTAMP',
-            'usuario_id': 'INTEGER REFERENCES usuarios(id)',
-        }
-        for column, definition in missing_columns.items():
-            if column not in columns:
-                cursor.execute(
-                    f'ALTER TABLE programacao ADD COLUMN {column} {definition}'
+            columns = {
+                row['column_name']
+                for row in execute_query(
+                    conn,
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = ?
+                    """,
+                    ('programacao',),
+                ).fetchall()
+            }
+            if columns == {'id', 'titulo', 'descricao'}:
+                execute_query(conn, 'ALTER TABLE programacao RENAME TO programacao_legacy')
+                execute_query(
+                    conn,
+                    '''
+                    CREATE TABLE programacao (
+                        id SERIAL PRIMARY KEY,
+                        nome TEXT NOT NULL,
+                        matricula INTEGER NOT NULL,
+                        escritorio TEXT NOT NULL,
+                        data_trabalho DATE NOT NULL,
+                        atividade TEXT NOT NULL,
+                        status TEXT DEFAULT 'Planejado',
+                        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        usuario_id INTEGER REFERENCES usuarios(id)
+                    )
+                    '''
                 )
+                execute_query(
+                    conn,
+                    '''
+                    INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade, status, data_criacao, usuario_id)
+                    SELECT id, titulo, 0, '', descricao, '', 'Planejado', CURRENT_TIMESTAMP, NULL FROM programacao_legacy
+                    '''
+                )
+                execute_query(conn, 'DROP TABLE programacao_legacy')
+                columns = {
+                    row['column_name']
+                    for row in execute_query(
+                        conn,
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = ?
+                        """,
+                        ('programacao',),
+                    ).fetchall()
+                }
 
-        cursor.execute(
-            'UPDATE programacao SET data_criacao = CURRENT_TIMESTAMP '
-            'WHERE data_criacao IS NULL'
-        )
-        cursor.execute(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = 'usuarios'
-            """
-        )
-        user_columns = {row['column_name'] for row in cursor.fetchall()}
-        if 'role' not in user_columns:
-            cursor.execute(
-                "ALTER TABLE usuarios ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
+            missing_columns = {
+                'matricula': "INTEGER NOT NULL DEFAULT 0",
+                'escritorio': "TEXT NOT NULL DEFAULT ''",
+                'status': "TEXT DEFAULT 'Planejado'",
+                'data_criacao': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+                'usuario_id': 'INTEGER REFERENCES usuarios(id)',
+            }
+            for column, definition in missing_columns.items():
+                if column not in columns:
+                    execute_query(
+                        conn,
+                        f'ALTER TABLE programacao ADD COLUMN {column} {definition}'
+                    )
+
+            execute_query(
+                conn,
+                'UPDATE programacao SET data_criacao = CURRENT_TIMESTAMP WHERE data_criacao IS NULL'
             )
+            user_columns = {
+                row['column_name']
+                for row in execute_query(
+                    conn,
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = ?
+                    """,
+                    ('usuarios',),
+                ).fetchall()
+            }
+            if 'role' not in user_columns:
+                execute_query(
+                    conn,
+                    "ALTER TABLE usuarios ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
+                )
+        else:
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                '''
+            )
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS programacao (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL,
+                    matricula INTEGER NOT NULL,
+                    escritorio TEXT NOT NULL,
+                    data_trabalho DATE NOT NULL,
+                    atividade TEXT NOT NULL,
+                    status TEXT DEFAULT 'Planejado',
+                    data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    usuario_id INTEGER REFERENCES usuarios(id)
+                )
+                '''
+            )
+
+            programacao_columns = [
+                row['name'] for row in conn.execute('PRAGMA table_info(programacao)').fetchall()
+            ]
+            if programacao_columns and set(programacao_columns) == {'id', 'titulo', 'descricao'}:
+                conn.execute('ALTER TABLE programacao RENAME TO programacao_legacy')
+                conn.execute(
+                    '''
+                    CREATE TABLE programacao (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome TEXT NOT NULL,
+                        matricula INTEGER NOT NULL,
+                        escritorio TEXT NOT NULL,
+                        data_trabalho DATE NOT NULL,
+                        atividade TEXT NOT NULL,
+                        status TEXT DEFAULT 'Planejado',
+                        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        usuario_id INTEGER REFERENCES usuarios(id)
+                    )
+                    '''
+                )
+                conn.execute(
+                    '''
+                    INSERT INTO programacao (
+                        id, nome, matricula, escritorio, data_trabalho,
+                        atividade, status, data_criacao, usuario_id
+                    )
+                    SELECT id, titulo, 0, '', descricao, '', 'Planejado', CURRENT_TIMESTAMP, NULL
+                    FROM programacao_legacy
+                    '''
+                )
+                conn.execute('DROP TABLE programacao_legacy')
+                programacao_columns = [
+                    row['name'] for row in conn.execute('PRAGMA table_info(programacao)').fetchall()
+                ]
+
+            missing_columns = {
+                'matricula': "INTEGER NOT NULL DEFAULT 0",
+                'escritorio': "TEXT NOT NULL DEFAULT ''",
+                'status': "TEXT DEFAULT 'Planejado'",
+                'data_criacao': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
+                'usuario_id': 'INTEGER REFERENCES usuarios(id)',
+            }
+            for column, definition in missing_columns.items():
+                if column not in programacao_columns:
+                    conn.execute(
+                        f'ALTER TABLE programacao ADD COLUMN {column} {definition}'
+                    )
+
+            conn.execute(
+                'UPDATE programacao SET data_criacao = CURRENT_TIMESTAMP WHERE data_criacao IS NULL'
+            )
+
+            user_columns = [
+                row['name'] for row in conn.execute('PRAGMA table_info(usuarios)').fetchall()
+            ]
+            if 'role' not in user_columns:
+                conn.execute(
+                    "ALTER TABLE usuarios ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
+                )
 
         admin_username = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
         if admin_username:
-            cursor.execute(
-                "UPDATE usuarios SET role = 'admin' WHERE username = %s",
+            execute_query(
+                conn,
+                "UPDATE usuarios SET role = 'admin' WHERE lower(username) = ?",
                 (admin_username,),
             )
         conn.commit()
@@ -198,7 +328,7 @@ def load_logged_in_user():
         try:
             g.user = execute_query(
                 conn,
-                'SELECT id, username, role FROM usuarios WHERE id = %s',
+                'SELECT id, username, role FROM usuarios WHERE id = ?',
                 (user_id,),
             ).fetchone()
         finally:
@@ -209,13 +339,13 @@ def get_owned_programacao(conn, programacao_id):
     if g.user['role'] == 'admin':
         programacao = execute_query(
             conn,
-            'SELECT * FROM programacao WHERE id = %s',
+            'SELECT * FROM programacao WHERE id = ?',
             (programacao_id,),
         ).fetchone()
     else:
         programacao = execute_query(
             conn,
-            'SELECT * FROM programacao WHERE id = %s AND usuario_id = %s',
+            'SELECT * FROM programacao WHERE id = ? AND usuario_id = ?',
             (programacao_id, g.user['id']),
         ).fetchone()
     if programacao is None:
@@ -243,18 +373,36 @@ def register():
         if error is None:
             conn = get_db_connection()
             try:
-                cursor = execute_query(
-                    conn,
-                    'INSERT INTO usuarios (username, password_hash) VALUES (%s, %s) RETURNING id',
-                    (username, generate_password_hash(password)),
-                )
+                if is_postgres_db():
+                    cursor = execute_query(
+                        conn,
+                        'INSERT INTO usuarios (username, password_hash) VALUES (?, ?) RETURNING id',
+                        (username, generate_password_hash(password)),
+                    )
+                    user_id = cursor.fetchone()['id']
+                else:
+                    cursor = execute_query(
+                        conn,
+                        'INSERT INTO usuarios (username, password_hash) VALUES (?, ?)',
+                        (username, generate_password_hash(password)),
+                    )
+                    user_id = cursor.lastrowid
                 conn.commit()
                 session.clear()
-                session['user_id'] = cursor.fetchone()['id']
+                session['user_id'] = user_id
                 csrf_token()
                 return redirect(url_for('index'))
-            except psycopg2.IntegrityError:
-                error = 'Esse nome de usuário já está em uso.'
+            except Exception as exc:
+                if isinstance(exc, sqlite3.IntegrityError):
+                    error = 'Esse nome de usuário já está em uso.'
+                elif is_postgres_db():
+                    import psycopg2
+                    if isinstance(exc, psycopg2.IntegrityError):
+                        error = 'Esse nome de usuário já está em uso.'
+                    else:
+                        raise
+                else:
+                    raise
             finally:
                 conn.close()
 
@@ -275,7 +423,7 @@ def login():
         try:
             user = execute_query(
                 conn,
-                'SELECT * FROM usuarios WHERE username = %s',
+                'SELECT * FROM usuarios WHERE username = ?',
                 (username,),
             ).fetchone()
         finally:
@@ -313,17 +461,17 @@ def index():
         escaped_search = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         pattern = f'%{escaped_search}%'
         filters.append(
-            "(nome LIKE %s ESCAPE '\\' OR CAST(matricula AS TEXT) LIKE %s ESCAPE '\\' "
-            "OR escritorio LIKE %s ESCAPE '\\' OR atividade LIKE %s ESCAPE '\\')"
+            "(nome LIKE ? ESCAPE '\\' OR CAST(matricula AS TEXT) LIKE ? ESCAPE '\\' "
+            "OR escritorio LIKE ? ESCAPE '\\' OR atividade LIKE ? ESCAPE '\\')"
         )
         values.extend([pattern] * 4)
 
     if escritorio_filter:
-        filters.append('escritorio = %s')
+        filters.append('escritorio = ?')
         values.append(escritorio_filter)
 
     if status_filter:
-        filters.append('status = %s')
+        filters.append('status = ?')
         values.append(status_filter)
 
     valid_date_from = valid_date_to = True
@@ -345,10 +493,10 @@ def index():
         date_from = date_to = ''
 
     if date_from:
-        filters.append('data_trabalho >= %s')
+        filters.append('data_trabalho >= ?')
         values.append(date_from)
     if date_to:
-        filters.append('data_trabalho <= %s')
+        filters.append('data_trabalho <= ?')
         values.append(date_to)
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ''
@@ -398,7 +546,7 @@ def add():
             INSERT INTO programacao (
                 nome, matricula, escritorio, data_trabalho, atividade,
                 data_criacao, usuario_id
-            ) VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
+            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             ''',
             (
                 request.form['nome'],
@@ -426,9 +574,9 @@ def edit(id):
                 conn,
                 '''
                 UPDATE programacao
-                SET nome = %s, matricula = %s, escritorio = %s, data_trabalho = %s,
-                    atividade = %s, status = %s
-                WHERE id = %s AND (%s = 'admin' OR usuario_id = %s)
+                SET nome = ?, matricula = ?, escritorio = ?, data_trabalho = ?,
+                    atividade = ?, status = ?
+                WHERE id = ? AND (? = 'admin' OR usuario_id = ?)
                 ''',
                 (
                     request.form['nome'],
@@ -457,7 +605,7 @@ def delete(id):
         get_owned_programacao(conn, id)
         execute_query(
             conn,
-            "DELETE FROM programacao WHERE id = %s AND (%s = 'admin' OR usuario_id = %s)",
+            "DELETE FROM programacao WHERE id = ? AND (? = 'admin' OR usuario_id = ?)",
             (id, g.user['role'], g.user['id']),
         )
         conn.commit()
