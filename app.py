@@ -1,9 +1,10 @@
 import hmac
 import os
 import secrets
-import psycopg2
 from datetime import date
 from functools import wraps
+
+import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from flask import (
@@ -32,28 +33,34 @@ DB_FILE = 'programacao.db'
 
 
 def get_db_connection():
-    # Conecta usando a variável de ambiente configurada no Render
-    conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
-    # Retorna os resultados como dicionários (similar ao sqlite3.Row)
-    conn.cursor_factory = RealDictCursor 
-    return conn
+    return psycopg2.connect(os.environ.get('DATABASE_URL'))
+
+
+def execute_query(conn, query, params=None):
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    cursor.execute(query, params or ())
+    return cursor
 
 
 def init_db():
     conn = get_db_connection()
     try:
-        conn.('''
+        cursor = conn.cursor()
+        cursor.execute(
+            '''
             CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
                 data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
-        conn.('''
+            '''
+        )
+        cursor.execute(
+            '''
             CREATE TABLE IF NOT EXISTS programacao (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 nome TEXT NOT NULL,
                 matricula INTEGER NOT NULL,
                 escritorio TEXT NOT NULL,
@@ -63,17 +70,24 @@ def init_db():
                 data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 usuario_id INTEGER REFERENCES usuarios(id)
             )
-        ''')
+            '''
+        )
 
-        columns = {
-            row['name'] for row in conn.('PRAGMA table_info(programacao)')
-        }
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'programacao'
+            """
+        )
+        columns = {row['column_name'] for row in cursor.fetchall()}
 
         if columns == {'id', 'titulo', 'descricao'}:
-            conn.('ALTER TABLE programacao RENAME TO programacao_legacy')
-            conn.('''
+            cursor.execute('ALTER TABLE programacao RENAME TO programacao_legacy')
+            cursor.execute(
+                '''
                 CREATE TABLE programacao (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     nome TEXT NOT NULL,
                     matricula INTEGER NOT NULL,
                     escritorio TEXT NOT NULL,
@@ -83,15 +97,23 @@ def init_db():
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     usuario_id INTEGER REFERENCES usuarios(id)
                 )
-            ''')
-            conn.('''
+                '''
+            )
+            cursor.execute(
+                '''
                 INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade)
                 SELECT id, titulo, 0, '', descricao, '' FROM programacao_legacy
-            ''')
-            conn.('DROP TABLE programacao_legacy')
-            columns = {
-                row['name'] for row in conn.('PRAGMA table_info(programacao)')
-            }
+                '''
+            )
+            cursor.execute('DROP TABLE programacao_legacy')
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'programacao'
+                """
+            )
+            columns = {row['column_name'] for row in cursor.fetchall()}
 
         missing_columns = {
             'matricula': "INTEGER NOT NULL DEFAULT 0",
@@ -102,25 +124,30 @@ def init_db():
         }
         for column, definition in missing_columns.items():
             if column not in columns:
-                conn.(
+                cursor.execute(
                     f'ALTER TABLE programacao ADD COLUMN {column} {definition}'
                 )
 
-        conn.(
+        cursor.execute(
             'UPDATE programacao SET data_criacao = CURRENT_TIMESTAMP '
             'WHERE data_criacao IS NULL'
         )
-        user_columns = {
-            row['name'] for row in conn.('PRAGMA table_info(usuarios)')
-        }
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'usuarios'
+            """
+        )
+        user_columns = {row['column_name'] for row in cursor.fetchall()}
         if 'role' not in user_columns:
-            conn.(
+            cursor.execute(
                 "ALTER TABLE usuarios ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
             )
 
         admin_username = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
         if admin_username:
-            conn.(
+            cursor.execute(
                 "UPDATE usuarios SET role = 'admin' WHERE username = %s",
                 (admin_username,),
             )
@@ -169,8 +196,10 @@ def load_logged_in_user():
     else:
         conn = get_db_connection()
         try:
-            g.user = conn.(
-                'SELECT id, username, role FROM usuarios WHERE id = %s', (user_id,)
+            g.user = execute_query(
+                conn,
+                'SELECT id, username, role FROM usuarios WHERE id = %s',
+                (user_id,),
             ).fetchone()
         finally:
             conn.close()
@@ -178,11 +207,14 @@ def load_logged_in_user():
 
 def get_owned_programacao(conn, programacao_id):
     if g.user['role'] == 'admin':
-        programacao = conn.(
-            'SELECT * FROM programacao WHERE id = %s', (programacao_id,)
+        programacao = execute_query(
+            conn,
+            'SELECT * FROM programacao WHERE id = %s',
+            (programacao_id,),
         ).fetchone()
     else:
-        programacao = conn.(
+        programacao = execute_query(
+            conn,
             'SELECT * FROM programacao WHERE id = %s AND usuario_id = %s',
             (programacao_id, g.user['id']),
         ).fetchone()
@@ -211,16 +243,17 @@ def register():
         if error is None:
             conn = get_db_connection()
             try:
-                cursor = conn.(
-                    'INSERT INTO usuarios (username, password_hash) VALUES (%s, %s)',
+                cursor = execute_query(
+                    conn,
+                    'INSERT INTO usuarios (username, password_hash) VALUES (%s, %s) RETURNING id',
                     (username, generate_password_hash(password)),
                 )
                 conn.commit()
                 session.clear()
-                session['user_id'] = cursor.lastrowid
+                session['user_id'] = cursor.fetchone()['id']
                 csrf_token()
                 return redirect(url_for('index'))
-            except sqlite3.IntegrityError:
+            except psycopg2.IntegrityError:
                 error = 'Esse nome de usuário já está em uso.'
             finally:
                 conn.close()
@@ -240,8 +273,10 @@ def login():
         password = request.form.get('password', '')
         conn = get_db_connection()
         try:
-            user = conn.(
-                'SELECT * FROM usuarios WHERE username = %s', (username,)
+            user = execute_query(
+                conn,
+                'SELECT * FROM usuarios WHERE username = %s',
+                (username,),
             ).fetchone()
         finally:
             conn.close()
@@ -319,17 +354,20 @@ def index():
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ''
     conn = get_db_connection()
     try:
-        programacoes = conn.(
+        programacoes = execute_query(
+            conn,
             f'SELECT * FROM programacao {where_clause} ORDER BY data_trabalho, id',
             values,
         ).fetchall()
-        escritorios = conn.(
+        escritorios = execute_query(
+            conn,
             "SELECT DISTINCT escritorio FROM programacao "
-            "WHERE escritorio != '' ORDER BY escritorio"
+            "WHERE escritorio != '' ORDER BY escritorio",
         ).fetchall()
-        statuses = conn.(
+        statuses = execute_query(
+            conn,
             "SELECT DISTINCT status FROM programacao "
-            "WHERE status IS NOT NULL AND status != '' ORDER BY status"
+            "WHERE status IS NOT NULL AND status != '' ORDER BY status",
         ).fetchall()
     finally:
         conn.close()
@@ -354,7 +392,8 @@ def index():
 def add():
     conn = get_db_connection()
     try:
-        conn.(
+        execute_query(
+            conn,
             '''
             INSERT INTO programacao (
                 nome, matricula, escritorio, data_trabalho, atividade,
@@ -383,7 +422,8 @@ def edit(id):
     try:
         programacao = get_owned_programacao(conn, id)
         if request.method == 'POST':
-            conn.(
+            execute_query(
+                conn,
                 '''
                 UPDATE programacao
                 SET nome = %s, matricula = %s, escritorio = %s, data_trabalho = %s,
@@ -415,7 +455,8 @@ def delete(id):
     conn = get_db_connection()
     try:
         get_owned_programacao(conn, id)
-        conn.(
+        execute_query(
+            conn,
             "DELETE FROM programacao WHERE id = %s AND (%s = 'admin' OR usuario_id = %s)",
             (id, g.user['role'], g.user['id']),
         )
