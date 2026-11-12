@@ -34,39 +34,40 @@
         {% endif %}
     {% endwith %}
 
+    {% if not user.escritorio %}
+    <h2>Complete seu perfil</h2>
+    <form action="{{ url_for('atualizar_escritorio') }}" method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="perfil-escritorio">Escritório</label>
+        <input id="perfil-escritorio" name="escritorio" maxlength="100" required>
+        <button type="submit">Salvar escritório</button>
+    </form>
+    {% endif %}
+
     <h2>Nova Programação</h2>
     <form action="{{ url_for('add') }}" method="POST">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <label>Nome do técnico:</label>
-        <input type="text" name="nome" required>
+        <input type="text" name="nome" value="{{ user.nome_completo or '' }}" {% if user.nome_completo %}readonly{% endif %} required>
 
-        <label>Matricula</label>
-        <input type="text" name="matricula" required>
+        <label>Matrícula</label>
+        <input type="text" name="matricula" value="{{ user.matricula or '' }}" {% if user.matricula %}readonly{% endif %} required>
 
-        <label>Escritório:</label>
-        <select name="escritorio" required>
-            <option value="">Selecione um escritório</option>
-            <option value="Abaiara">Abaiara</option>
-            <option value="Altaneira">Altaneira</option>
-            <option value="Barbalha">Barbalha</option>
-            <option value="Caririaçu">Caririaçu</option>
-            <option value="Crato">Crato</option>
-            <option value="Crato - Regional">Crato - Regional</option>
-            <option value="Farias Brito">Farias Brito</option>
-            <option value="Granjeiro">Granjeiro</option>
-            <option value="Jardim">Jardim</option>
-            <option value="Juazeiro do Norte">Juazeiro do Norte</option>
-            <option value="Missão Velha">Missão Velha</option>
-            <option value="Nova Olinda">Nova Olinda</option>
-            <option value="Santana do Cariri">Santana do Cariri</option>
-            <option value="Várzea Alegre">Várzea Alegre</option>
-        </select>
+        <label for="escritorio-programacao">Escritório:</label>
+        <input id="escritorio-programacao" type="text" value="{{ user.escritorio or '' }}" readonly required>
 
         <label>Data:</label>
         <input type="date" name="data_trabalho" required>
         
         <label>Atividade:</label>
         <textarea name="atividade" required></textarea>
+
+        <label>Tipo de atividade:</label>
+        <select name="tipo_atividade" required>
+            <option value="">Selecione o tipo de atividade</option>
+            <option value="Campo">Campo</option>
+            <option value="Escritório">Escritório</option>
+        </select>
         
         <button type="submit">Agendar Trabalho</button>
     </form>
@@ -96,6 +97,14 @@
             </select>
         </div>
         <div>
+            <label for="filtro-tipo-atividade">Tipo de atividade</label>
+            <select id="filtro-tipo-atividade" name="tipo_atividade">
+                <option value="">Todos</option>
+                <option value="Campo" {% if filtros.tipo_atividade == 'Campo' %}selected{% endif %}>Campo</option>
+                <option value="Escritório" {% if filtros.tipo_atividade == 'Escritório' %}selected{% endif %}>Escritório</option>
+            </select>
+        </div>
+        <div>
             <label for="data-inicio">Data inicial</label>
             <input id="data-inicio" type="date" name="data_inicio" value="{{ filtros.data_inicio }}">
         </div>
@@ -109,6 +118,28 @@
         </div>
     </form>
 
+    {% if user.role == 'admin' %}
+    <h2>Planilha mensal por usuário</h2>
+    <form action="{{ url_for('planilha_mensal') }}" method="GET" class="filtros">
+        <div>
+            <label for="tecnico">Usuário</label>
+            <select id="tecnico" name="tecnico" required>
+                <option value="">Selecione um usuário</option>
+                {% for technician in technicians %}
+                <option value="{{ technician.id }}">{{ technician.nome_completo }} — {{ technician.matricula }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="mes-planilha">Mês</label>
+            <input id="mes-planilha" type="month" name="mes" value="{{ mes_atual }}" required>
+        </div>
+        <div>
+            <button type="submit">Baixar planilha Excel</button>
+        </div>
+    </form>
+    {% endif %}
+
     <table>
         <thead>
             <tr>
@@ -116,6 +147,7 @@
                 <th>Escritório </th>
                 <th>Nome do técnico</th>
                 <th>Matricula</th>
+                <th>Tipo de atividade</th>
                 <th>Atividade</th>
                 <th>Status</th>
                 <th>Criado em</th>
@@ -129,6 +161,7 @@
                 <td>{{ p.escritorio }} </td>
                 <td>{{ p.nome }}</td>
                 <td>{{ p.matricula }}</td>
+                <td>{{ p.tipo_atividade }}</td>
                 <td>{{ p.atividade }}</td>
                 <td><strong>{{ p.status }}</strong></td>
                 <td>{{ p.data_criacao }}</td>
@@ -145,7 +178,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="8">Nenhuma programação corresponde aos filtros.</td></tr>
+            <tr><td colspan="9">Nenhuma programação corresponde aos filtros.</td></tr>
             {% endfor %}
         </tbody>
     </table>
