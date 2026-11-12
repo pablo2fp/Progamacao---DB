@@ -1,8 +1,14 @@
 import hmac
+import hashlib
 import os
+import re
 import secrets
+import smtplib
 import sqlite3
-from datetime import date
+import ssl
+from datetime import date, datetime
+from email.message import EmailMessage
+from io import BytesIO
 from functools import wraps
 
 from flask import (
@@ -13,9 +19,13 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -79,6 +89,11 @@ def init_db():
                     id SERIAL PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
+                    nome_completo TEXT NOT NULL,
+                    matricula TEXT NOT NULL,
+                    escritorio TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    password_reset_token_hash TEXT,
                     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -90,10 +105,11 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS programacao (
                     id SERIAL PRIMARY KEY,
                     nome TEXT NOT NULL,
-                    matricula INTEGER NOT NULL,
+                    matricula TEXT NOT NULL,
                     escritorio TEXT NOT NULL,
                     data_trabalho DATE NOT NULL,
                     atividade TEXT NOT NULL,
+                    tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                     status TEXT DEFAULT 'Planejado',
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     usuario_id INTEGER REFERENCES usuarios(id)
@@ -120,10 +136,11 @@ def init_db():
                     CREATE TABLE programacao (
                         id SERIAL PRIMARY KEY,
                         nome TEXT NOT NULL,
-                        matricula INTEGER NOT NULL,
+                        matricula TEXT NOT NULL,
                         escritorio TEXT NOT NULL,
                         data_trabalho DATE NOT NULL,
                         atividade TEXT NOT NULL,
+                        tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                         status TEXT DEFAULT 'Planejado',
                         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         usuario_id INTEGER REFERENCES usuarios(id)
@@ -133,8 +150,8 @@ def init_db():
                 execute_query(
                     conn,
                     '''
-                    INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade, status, data_criacao, usuario_id)
-                    SELECT id, titulo, 0, '', descricao, '', 'Planejado', CURRENT_TIMESTAMP, NULL FROM programacao_legacy
+                    INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade, tipo_atividade, status, data_criacao, usuario_id)
+                    SELECT id, titulo, '0', '', descricao, '', 'Escritório', 'Planejado', CURRENT_TIMESTAMP, NULL FROM programacao_legacy
                     '''
                 )
                 execute_query(conn, 'DROP TABLE programacao_legacy')
@@ -152,8 +169,9 @@ def init_db():
                 }
 
             missing_columns = {
-                'matricula': "INTEGER NOT NULL DEFAULT 0",
+                'matricula': "TEXT NOT NULL DEFAULT '0'",
                 'escritorio': "TEXT NOT NULL DEFAULT ''",
+                'tipo_atividade': "TEXT NOT NULL DEFAULT 'Escritório'",
                 'status': "TEXT DEFAULT 'Planejado'",
                 'data_criacao': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
                 'usuario_id': 'INTEGER REFERENCES usuarios(id)',
@@ -164,6 +182,20 @@ def init_db():
                         conn,
                         f'ALTER TABLE programacao ADD COLUMN {column} {definition}'
                     )
+
+            matricula_type = execute_query(
+                conn,
+                """
+                SELECT data_type FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'programacao'
+                  AND column_name = 'matricula'
+                """,
+            ).fetchone()['data_type']
+            if matricula_type != 'text':
+                execute_query(
+                    conn,
+                    'ALTER TABLE programacao ALTER COLUMN matricula TYPE TEXT USING matricula::text'
+                )
 
             execute_query(
                 conn,
@@ -186,6 +218,35 @@ def init_db():
                     conn,
                     "ALTER TABLE usuarios ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
                 )
+            for column, definition in {
+                'nome_completo': 'TEXT',
+                'matricula': 'TEXT',
+                'escritorio': 'TEXT',
+                'email': 'TEXT',
+                'password_reset_token_hash': 'TEXT',
+            }.items():
+                if column not in user_columns:
+                    execute_query(
+                        conn,
+                        f'ALTER TABLE usuarios ADD COLUMN {column} {definition}'
+                    )
+            execute_query(
+                conn,
+                '''
+                UPDATE usuarios
+                SET escritorio = (
+                    SELECT p.escritorio FROM programacao p
+                    WHERE p.usuario_id = usuarios.id AND p.escritorio <> ''
+                    ORDER BY p.data_criacao DESC, p.id DESC LIMIT 1
+                )
+                WHERE escritorio IS NULL OR escritorio = ''
+                ''',
+            )
+            execute_query(
+                conn,
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_lower '
+                'ON usuarios (lower(email)) WHERE email IS NOT NULL'
+            )
         else:
             conn.execute(
                 '''
@@ -193,6 +254,11 @@ def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
+                    nome_completo TEXT NOT NULL,
+                    matricula TEXT NOT NULL,
+                    escritorio TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    password_reset_token_hash TEXT,
                     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -203,10 +269,11 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS programacao (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nome TEXT NOT NULL,
-                    matricula INTEGER NOT NULL,
+                    matricula TEXT NOT NULL,
                     escritorio TEXT NOT NULL,
                     data_trabalho DATE NOT NULL,
                     atividade TEXT NOT NULL,
+                    tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                     status TEXT DEFAULT 'Planejado',
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     usuario_id INTEGER REFERENCES usuarios(id)
@@ -224,10 +291,11 @@ def init_db():
                     CREATE TABLE programacao (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         nome TEXT NOT NULL,
-                        matricula INTEGER NOT NULL,
+                        matricula TEXT NOT NULL,
                         escritorio TEXT NOT NULL,
                         data_trabalho DATE NOT NULL,
                         atividade TEXT NOT NULL,
+                        tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                         status TEXT DEFAULT 'Planejado',
                         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         usuario_id INTEGER REFERENCES usuarios(id)
@@ -238,9 +306,9 @@ def init_db():
                     '''
                     INSERT INTO programacao (
                         id, nome, matricula, escritorio, data_trabalho,
-                        atividade, status, data_criacao, usuario_id
+                        atividade, tipo_atividade, status, data_criacao, usuario_id
                     )
-                    SELECT id, titulo, 0, '', descricao, '', 'Planejado', CURRENT_TIMESTAMP, NULL
+                    SELECT id, titulo, '0', '', descricao, '', 'Escritório', 'Planejado', CURRENT_TIMESTAMP, NULL
                     FROM programacao_legacy
                     '''
                 )
@@ -250,8 +318,9 @@ def init_db():
                 ]
 
             missing_columns = {
-                'matricula': "INTEGER NOT NULL DEFAULT 0",
+                'matricula': "TEXT NOT NULL DEFAULT '0'",
                 'escritorio': "TEXT NOT NULL DEFAULT ''",
+                'tipo_atividade': "TEXT NOT NULL DEFAULT 'Escritório'",
                 'status': "TEXT DEFAULT 'Planejado'",
                 'data_criacao': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
                 'usuario_id': 'INTEGER REFERENCES usuarios(id)',
@@ -273,6 +342,65 @@ def init_db():
                 conn.execute(
                     "ALTER TABLE usuarios ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
                 )
+            for column, definition in {
+                'nome_completo': 'TEXT',
+                'matricula': 'TEXT',
+                'escritorio': 'TEXT',
+                'email': 'TEXT',
+                'password_reset_token_hash': 'TEXT',
+            }.items():
+                if column not in user_columns:
+                    conn.execute(f'ALTER TABLE usuarios ADD COLUMN {column} {definition}')
+            conn.execute(
+                '''
+                UPDATE usuarios
+                SET escritorio = (
+                    SELECT p.escritorio FROM programacao p
+                    WHERE p.usuario_id = usuarios.id AND p.escritorio <> ''
+                    ORDER BY p.data_criacao DESC, p.id DESC LIMIT 1
+                )
+                WHERE escritorio IS NULL OR escritorio = ''
+                '''
+            )
+            conn.execute(
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_lower '
+                'ON usuarios (lower(email)) WHERE email IS NOT NULL'
+            )
+
+            programacao_info = {
+                row['name']: row['type']
+                for row in conn.execute('PRAGMA table_info(programacao)').fetchall()
+            }
+            if programacao_info.get('matricula', '').upper() != 'TEXT':
+                conn.execute(
+                    '''
+                    CREATE TABLE programacao_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome TEXT NOT NULL,
+                        matricula TEXT NOT NULL,
+                        escritorio TEXT NOT NULL,
+                        data_trabalho DATE NOT NULL,
+                        atividade TEXT NOT NULL,
+                        tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
+                        status TEXT DEFAULT 'Planejado',
+                        data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        usuario_id INTEGER REFERENCES usuarios(id)
+                    )
+                    '''
+                )
+                conn.execute(
+                    '''
+                    INSERT INTO programacao_new (
+                        id, nome, matricula, escritorio, data_trabalho,
+                        atividade, tipo_atividade, status, data_criacao, usuario_id
+                    )
+                    SELECT id, nome, CAST(matricula AS TEXT), escritorio, data_trabalho,
+                           atividade, tipo_atividade, status, data_criacao, usuario_id
+                    FROM programacao
+                    '''
+                )
+                conn.execute('DROP TABLE programacao')
+                conn.execute('ALTER TABLE programacao_new RENAME TO programacao')
 
         admin_username = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
         if admin_username:
@@ -328,7 +456,10 @@ def load_logged_in_user():
         try:
             g.user = execute_query(
                 conn,
-                'SELECT id, username, role FROM usuarios WHERE id = ?',
+                '''
+                SELECT id, username, nome_completo, matricula, escritorio, email, role
+                FROM usuarios WHERE id = ?
+                ''',
                 (user_id,),
             ).fetchone()
         finally:
@@ -353,6 +484,50 @@ def get_owned_programacao(conn, programacao_id):
     return programacao
 
 
+def parse_iso_date(value):
+    try:
+        parsed_date = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed_date if parsed_date.isoformat() == value else None
+
+
+def password_reset_token(user_id):
+    return URLSafeTimedSerializer(
+        app.config['SECRET_KEY'],
+        salt='password-reset',
+    ).dumps(user_id)
+
+
+def send_password_reset_email(email, reset_url):
+    smtp_host = os.environ.get('SMTP_HOST', '').strip()
+    sender = os.environ.get('SMTP_FROM', '').strip()
+    if not smtp_host or not sender:
+        raise RuntimeError('Configure SMTP_HOST e SMTP_FROM para habilitar a recuperação de senha.')
+
+    message = EmailMessage()
+    message['Subject'] = 'Recuperação de senha'
+    message['From'] = sender
+    message['To'] = email
+    message.set_content(
+        'Recebemos uma solicitação para redefinir sua senha. '
+        f'Acesse o link abaixo em até uma hora:\n\n{reset_url}\n\n'
+        'Se você não solicitou a redefinição, ignore esta mensagem.'
+    )
+
+    with smtplib.SMTP(
+        smtp_host,
+        int(os.environ.get('SMTP_PORT', '587')),
+        timeout=10,
+    ) as smtp:
+        if os.environ.get('SMTP_USE_TLS', '1') == '1':
+            smtp.starttls(context=ssl.create_default_context())
+        smtp_username = os.environ.get('SMTP_USERNAME', '')
+        if smtp_username:
+            smtp.login(smtp_username, os.environ.get('SMTP_PASSWORD', ''))
+        smtp.send_message(message)
+
+
 init_db()
 
 
@@ -364,9 +539,21 @@ def register():
     if request.method == 'POST':
         username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '')
+        nome_completo = ' '.join(request.form.get('nome_completo', '').split())
+        matricula = request.form.get('matricula', '').strip()
+        escritorio = request.form.get('escritorio', '').strip()
+        email = request.form.get('email', '').strip().lower()
         error = None
         if not 3 <= len(username) <= 50:
             error = 'O usuário deve ter entre 3 e 50 caracteres.'
+        elif not 3 <= len(nome_completo) <= 150:
+            error = 'Informe seu nome completo (de 3 a 150 caracteres).'
+        elif not 1 <= len(matricula) <= 30:
+            error = 'A matrícula deve ter entre 1 e 30 caracteres.'
+        elif not 1 <= len(escritorio) <= 100:
+            error = 'Informe um escritório válido (até 100 caracteres).'
+        elif len(email) > 254 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
+            error = 'Informe um endereço de e-mail válido.'
         elif not 12 <= len(password) <= 128:
             error = 'A senha deve ter entre 12 e 128 caracteres.'
 
@@ -376,15 +563,35 @@ def register():
                 if is_postgres_db():
                     cursor = execute_query(
                         conn,
-                        'INSERT INTO usuarios (username, password_hash) VALUES (?, ?) RETURNING id',
-                        (username, generate_password_hash(password)),
+                        '''
+                        INSERT INTO usuarios (username, password_hash, nome_completo, matricula, escritorio, email)
+                        VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+                        ''',
+                        (
+                            username,
+                            generate_password_hash(password),
+                            nome_completo,
+                            matricula,
+                            escritorio,
+                            email,
+                        ),
                     )
                     user_id = cursor.fetchone()['id']
                 else:
                     cursor = execute_query(
                         conn,
-                        'INSERT INTO usuarios (username, password_hash) VALUES (?, ?)',
-                        (username, generate_password_hash(password)),
+                        '''
+                        INSERT INTO usuarios (username, password_hash, nome_completo, matricula, escritorio, email)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ''',
+                        (
+                            username,
+                            generate_password_hash(password),
+                            nome_completo,
+                            matricula,
+                            escritorio,
+                            email,
+                        ),
                     )
                     user_id = cursor.lastrowid
                 conn.commit()
@@ -394,11 +601,11 @@ def register():
                 return redirect(url_for('index'))
             except Exception as exc:
                 if isinstance(exc, sqlite3.IntegrityError):
-                    error = 'Esse nome de usuário já está em uso.'
+                    error = 'Esse nome de usuário ou e-mail já está em uso.'
                 elif is_postgres_db():
                     import psycopg2
                     if isinstance(exc, psycopg2.IntegrityError):
-                        error = 'Esse nome de usuário já está em uso.'
+                        error = 'Esse nome de usuário ou e-mail já está em uso.'
                     else:
                         raise
                 else:
@@ -409,6 +616,101 @@ def register():
         flash(error)
 
     return render_template('register.html')
+
+
+@app.route('/recuperar-senha', methods=('GET', 'POST'))
+def recuperar_senha():
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        if len(email) > 254 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
+            flash('Informe um endereço de e-mail válido.')
+            return render_template('recuperar_senha.html')
+
+        conn = get_db_connection()
+        try:
+            user = execute_query(
+                conn,
+                'SELECT id FROM usuarios WHERE lower(email) = ?',
+                (email,),
+            ).fetchone()
+            if user is not None:
+                token = password_reset_token(user['id'])
+                token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+                execute_query(
+                    conn,
+                    'UPDATE usuarios SET password_reset_token_hash = ? WHERE id = ?',
+                    (token_hash, user['id']),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+        if user is not None:
+            try:
+                send_password_reset_email(
+                    email,
+                    url_for('redefinir_senha', token=token, _external=True),
+                )
+            except (OSError, RuntimeError, smtplib.SMTPException, ValueError):
+                app.logger.exception('Falha ao enviar e-mail de recuperação de senha.')
+                flash('Não foi possível enviar o e-mail de recuperação. Tente novamente mais tarde.')
+                return render_template('recuperar_senha.html')
+
+        flash('Se o e-mail estiver cadastrado, você receberá um link para redefinir a senha.')
+        return redirect(url_for('login'))
+
+    return render_template('recuperar_senha.html')
+
+
+@app.route('/redefinir-senha/<token>', methods=('GET', 'POST'))
+def redefinir_senha(token):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='password-reset')
+    try:
+        user_id = serializer.loads(token, max_age=3600)
+    except (BadSignature, SignatureExpired):
+        flash('O link de recuperação é inválido ou expirou. Solicite um novo link.')
+        return redirect(url_for('recuperar_senha'))
+
+    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+    conn = get_db_connection()
+    try:
+        user = execute_query(
+            conn,
+            'SELECT id, password_reset_token_hash FROM usuarios WHERE id = ?',
+            (user_id,),
+        ).fetchone()
+        if (
+            user is None
+            or not user['password_reset_token_hash']
+            or not hmac.compare_digest(user['password_reset_token_hash'], token_hash)
+        ):
+            flash('O link de recuperação é inválido ou já foi utilizado. Solicite um novo link.')
+            return redirect(url_for('recuperar_senha'))
+
+        if request.method == 'POST':
+            password = request.form.get('password', '')
+            if not 12 <= len(password) <= 128:
+                flash('A senha deve ter entre 12 e 128 caracteres.')
+            else:
+                cursor = execute_query(
+                    conn,
+                    '''
+                    UPDATE usuarios
+                    SET password_hash = ?, password_reset_token_hash = NULL
+                    WHERE id = ? AND password_reset_token_hash = ?
+                    ''',
+                    (generate_password_hash(password), user_id, token_hash),
+                )
+                if cursor.rowcount != 1:
+                    flash('O link de recuperação já foi utilizado. Solicite um novo link.')
+                    return redirect(url_for('recuperar_senha'))
+                conn.commit()
+                flash('Sua senha foi redefinida. Entre com a nova senha.')
+                return redirect(url_for('login'))
+    finally:
+        conn.close()
+
+    return render_template('redefinir_senha.html')
 
 
 @app.route('/login', methods=('GET', 'POST'))
@@ -446,12 +748,35 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/perfil/escritorio', methods=('POST',))
+@login_required
+def atualizar_escritorio():
+    escritorio = request.form.get('escritorio', '').strip()
+    if not 1 <= len(escritorio) <= 100:
+        flash('Informe um escritório válido (até 100 caracteres).')
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    try:
+        execute_query(
+            conn,
+            'UPDATE usuarios SET escritorio = ? WHERE id = ?',
+            (escritorio, g.user['id']),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    flash('Escritório atualizado. Ele será preenchido automaticamente nas programações.')
+    return redirect(url_for('index'))
+
+
 @app.route('/')
 @login_required
 def index():
     search = request.args.get('q', '').strip()[:100]
     escritorio_filter = request.args.get('escritorio', '').strip()
     status_filter = request.args.get('status', '').strip()
+    tipo_atividade_filter = request.args.get('tipo_atividade', '').strip()
     date_from = request.args.get('data_inicio', '').strip()
     date_to = request.args.get('data_fim', '').strip()
     filters = []
@@ -474,16 +799,20 @@ def index():
         filters.append('status = ?')
         values.append(status_filter)
 
+    if tipo_atividade_filter in ('Campo', 'Escritório'):
+        filters.append('tipo_atividade = ?')
+        values.append(tipo_atividade_filter)
+    elif tipo_atividade_filter:
+        flash('Selecione um tipo de atividade válido.')
+        tipo_atividade_filter = ''
+
     valid_date_from = valid_date_to = True
     for date_value in (date_from, date_to):
-        if date_value:
-            try:
-                date.fromisoformat(date_value)
-            except ValueError:
-                if date_value == date_from:
-                    valid_date_from = False
-                if date_value == date_to:
-                    valid_date_to = False
+        if date_value and parse_iso_date(date_value) is None:
+            if date_value == date_from:
+                valid_date_from = False
+            if date_value == date_to:
+                valid_date_to = False
     if not valid_date_from or not valid_date_to:
         flash('Informe as datas do filtro no formato válido.')
         date_from = date_from if valid_date_from else ''
@@ -517,6 +846,18 @@ def index():
             "SELECT DISTINCT status FROM programacao "
             "WHERE status IS NOT NULL AND status != '' ORDER BY status",
         ).fetchall()
+        technicians = []
+        if g.user['role'] == 'admin':
+            technicians = execute_query(
+                conn,
+                '''
+                SELECT id, COALESCE(NULLIF(nome_completo, ''), username) AS nome_completo,
+                       matricula
+                FROM usuarios u
+                WHERE role IN ('user', 'admin')
+                ORDER BY nome_completo, matricula
+                ''',
+            ).fetchall()
     finally:
         conn.close()
     return render_template(
@@ -527,17 +868,135 @@ def index():
             'q': search,
             'escritorio': escritorio_filter,
             'status': status_filter,
+            'tipo_atividade': tipo_atividade_filter,
             'data_inicio': date_from,
             'data_fim': date_to,
         },
         escritorios=escritorios,
         statuses=statuses,
+        technicians=technicians,
+        mes_atual=date.today().strftime('%Y-%m'),
+    )
+
+
+@app.route('/admin/planilha-mensal')
+@login_required
+def planilha_mensal():
+    if g.user['role'] != 'admin':
+        abort(403)
+
+    technician_id = request.args.get('tecnico', type=int)
+    month_value = request.args.get('mes', date.today().strftime('%Y-%m'))
+    try:
+        month_start = date.fromisoformat(f'{month_value}-01')
+    except ValueError:
+        abort(400, description='Informe o mês no formato AAAA-MM.')
+    if len(month_value) != 7 or month_start.strftime('%Y-%m') != month_value:
+        abort(400, description='Informe o mês no formato AAAA-MM.')
+    if technician_id is None:
+        abort(400, description='Selecione um técnico.')
+
+    next_month = (
+        date(month_start.year + 1, 1, 1)
+        if month_start.month == 12
+        else date(month_start.year, month_start.month + 1, 1)
+    )
+    conn = get_db_connection()
+    try:
+        technician = execute_query(
+            conn,
+            '''
+            SELECT id, COALESCE(NULLIF(nome_completo, ''), username) AS nome_completo,
+                   username, matricula
+            FROM usuarios WHERE id = ? AND role IN ('user', 'admin')
+            ''',
+            (technician_id,),
+        ).fetchone()
+        if technician is None:
+            abort(404)
+        programacoes = execute_query(
+            conn,
+            '''
+            SELECT data_trabalho, escritorio, nome, matricula, tipo_atividade,
+                   atividade, status
+            FROM programacao
+            WHERE usuario_id = ? AND data_trabalho >= ? AND data_trabalho < ?
+            ORDER BY data_trabalho, id
+            ''',
+            (technician_id, month_start.isoformat(), next_month.isoformat()),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = f'Programação {month_value}'
+    worksheet.append([
+        'Data', 'Escritório', 'Nome do técnico', 'Matrícula',
+        'Tipo de atividade', 'Atividade', 'Status',
+    ])
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+
+    for programacao in programacoes:
+        raw_date = programacao['data_trabalho']
+        work_date = (
+            raw_date
+            if isinstance(raw_date, (date, datetime))
+            else date.fromisoformat(str(raw_date)[:10])
+        )
+        worksheet.append([
+            work_date,
+            programacao['escritorio'],
+            programacao['nome'],
+            programacao['matricula'],
+            programacao['tipo_atividade'],
+            programacao['atividade'],
+            programacao['status'],
+        ])
+        worksheet.cell(worksheet.max_row, 1).number_format = 'dd/mm/yyyy'
+        for cell in worksheet[worksheet.max_row]:
+            if isinstance(cell.value, str):
+                cell.data_type = 's'
+
+    worksheet.freeze_panes = 'A2'
+    worksheet.auto_filter.ref = worksheet.dimensions
+    for column, width in {'A': 14, 'B': 24, 'C': 30, 'D': 18, 'E': 22, 'F': 50, 'G': 18}.items():
+        worksheet.column_dimensions[column].width = width
+
+    output = BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'programacao_{technician["username"]}_{month_value}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
 
 
 @app.route('/add', methods=('POST',))
 @login_required
 def add():
+    tipo_atividade = request.form.get('tipo_atividade', '')
+    if tipo_atividade not in ('Campo', 'Escritório'):
+        abort(400, description='Selecione um tipo de atividade válido.')
+
+    nome = g.user['nome_completo'] or request.form.get('nome', '').strip()
+    matricula = g.user['matricula'] or request.form.get('matricula', '').strip()
+    data_trabalho = request.form.get('data_trabalho', '').strip()
+    atividade = request.form.get('atividade', '').strip()
+    if not nome or len(nome) > 150 or not matricula or len(matricula) > 30:
+        abort(400, description='Informe um nome e uma matrícula válidos.')
+    escritorio = (g.user['escritorio'] or '').strip()
+    if not escritorio or len(escritorio) > 100:
+        flash('Cadastre seu escritório para continuar com a programação.')
+        return redirect(url_for('index'))
+    if parse_iso_date(data_trabalho) is None:
+        abort(400, description='Informe uma data válida no formato AAAA-MM-DD.')
+    if not atividade:
+        abort(400, description='Informe a atividade.')
+
     conn = get_db_connection()
     try:
         execute_query(
@@ -545,15 +1004,16 @@ def add():
             '''
             INSERT INTO programacao (
                 nome, matricula, escritorio, data_trabalho, atividade,
-                data_criacao, usuario_id
-            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                tipo_atividade, data_criacao, usuario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             ''',
             (
-                request.form['nome'],
-                request.form['matricula'],
-                request.form['escritorio'],
-                request.form['data_trabalho'],
-                request.form['atividade'],
+                nome,
+                matricula,
+                escritorio,
+                data_trabalho,
+                atividade,
+                tipo_atividade,
                 g.user['id'],
             ),
         )
@@ -570,21 +1030,41 @@ def edit(id):
     try:
         programacao = get_owned_programacao(conn, id)
         if request.method == 'POST':
+            tipo_atividade = request.form.get('tipo_atividade', '')
+            if tipo_atividade not in ('Campo', 'Escritório'):
+                abort(400, description='Selecione um tipo de atividade válido.')
+            nome = request.form.get('nome', '').strip()
+            matricula = request.form.get('matricula', '').strip()
+            escritorio = request.form.get('escritorio', '').strip()
+            data_trabalho = request.form.get('data_trabalho', '').strip()
+            atividade = request.form.get('atividade', '').strip()
+            status = request.form.get('status', '')
+            if not nome or len(nome) > 150 or not matricula or len(matricula) > 30:
+                abort(400, description='Informe um nome e uma matrícula válidos.')
+            if not escritorio or len(escritorio) > 100:
+                abort(400, description='Informe um escritório válido.')
+            if parse_iso_date(data_trabalho) is None:
+                abort(400, description='Informe uma data válida no formato AAAA-MM-DD.')
+            if not atividade:
+                abort(400, description='Informe a atividade.')
+            if status not in ('Planejado', 'Em Andamento', 'Concluído'):
+                abort(400, description='Selecione um status válido.')
             execute_query(
                 conn,
                 '''
                 UPDATE programacao
                 SET nome = ?, matricula = ?, escritorio = ?, data_trabalho = ?,
-                    atividade = ?, status = ?
+                    atividade = ?, tipo_atividade = ?, status = ?
                 WHERE id = ? AND (? = 'admin' OR usuario_id = ?)
                 ''',
                 (
-                    request.form['nome'],
-                    request.form['matricula'],
-                    request.form['escritorio'],
-                    request.form['data_trabalho'],
-                    request.form['atividade'],
-                    request.form['status'],
+                    nome,
+                    matricula,
+                    escritorio,
+                    data_trabalho,
+                    atividade,
+                    tipo_atividade,
+                    status,
                     id,
                     g.user['role'],
                     g.user['id'],
