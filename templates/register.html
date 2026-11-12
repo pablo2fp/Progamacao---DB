@@ -7,6 +7,9 @@
         body { font-family: Arial, sans-serif; margin: 50px; background-color: #f4f7f6; }
         form { background: #fff; padding: 20px; border-radius: 8px; max-width: 400px; margin: 0 auto; }
         input { width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
+        .senha { display: flex; gap: 8px; }
+        .senha input { flex: 1; }
+        .senha button { white-space: nowrap; }
         button { background-color: #28a745; color: white; padding: 10px; border: 0; border-radius: 4px; cursor: pointer; }
         li { color: #b00020; }
     </style>
@@ -18,12 +21,34 @@
         {% with messages = get_flashed_messages() %}
             {% if messages %}<ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
         {% endwith %}
+        <label for="nome_completo">Nome completo</label>
+        <input id="nome_completo" name="nome_completo" autocomplete="name" maxlength="150" required>
+        <label for="matricula">Matrícula da empresa</label>
+        <input id="matricula" name="matricula" autocomplete="off" maxlength="30" required>
+        <label for="escritorio">Escritório</label>
+        <input id="escritorio" name="escritorio" autocomplete="organization" maxlength="100" required>
+        <label for="email">E-mail</label>
+        <input id="email" type="email" name="email" autocomplete="email" maxlength="254" required>
         <label for="username">Usuário (3 a 50 caracteres)</label>
         <input id="username" name="username" autocomplete="username" minlength="3" maxlength="50" required>
         <label for="password">Senha (12 a 128 caracteres)</label>
-        <input id="password" type="password" name="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+        <div class="senha">
+            <input id="password" type="password" name="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+            <button type="button" class="mostrar-senha" aria-pressed="false">Mostrar</button>
+        </div>
         <button type="submit">Criar conta</button>
         <p>Já tem conta? <a href="{{ url_for('login') }}">Entrar</a></p>
     </form>
+    <script>
+        document.querySelectorAll('.mostrar-senha').forEach((button) => {
+            button.addEventListener('click', () => {
+                const password = button.parentElement.querySelector('input');
+                const visible = password.type === 'password';
+                password.type = visible ? 'text' : 'password';
+                button.textContent = visible ? 'Ocultar' : 'Mostrar';
+                button.setAttribute('aria-pressed', String(visible));
+            });
+        });
+    </script>
 </body>
 </html>

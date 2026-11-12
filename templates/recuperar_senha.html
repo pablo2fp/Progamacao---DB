@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Recuperar senha</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 50px; background-color: #f4f7f6; }
+        form { background: #fff; padding: 20px; border-radius: 8px; max-width: 400px; margin: 0 auto; }
+        input { width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 10px; border: 0; border-radius: 4px; cursor: pointer; }
+        li { color: #b00020; }
+    </style>
+</head>
+<body>
+    <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <h1>Recuperar senha</h1>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}<ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
+        {% endwith %}
+        <label for="email">E-mail cadastrado</label>
+        <input id="email" type="email" name="email" autocomplete="email" maxlength="254" required>
+        <button type="submit">Enviar link de recuperação</button>
+        <p><a href="{{ url_for('login') }}">Voltar para entrar</a></p>
+    </form>
+</body>
+</html>
