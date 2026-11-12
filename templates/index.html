@@ -22,6 +22,7 @@
     <div>
         Logado como <strong>{{ user.username }}</strong>
         {% if user.role == 'admin' %}<strong>(Administrador)</strong>{% endif %}
+        <a href="{{ url_for('configuracao') }}">Configurações da conta</a>
         <form action="{{ url_for('logout') }}" method="POST" style="display: inline; box-shadow: none; padding: 0;">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <button type="submit">Sair</button>

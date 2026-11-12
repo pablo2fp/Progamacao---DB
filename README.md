@@ -1,7 +1,7 @@
+
 # Sistema de Programação Mensal
 
 Uma aplicação web desenvolvida em Python com o microframework Flask para gerenciar a escala e as atividades mensais de técnicos em diversos escritórios. O sistema permite o cadastro de atividades, filtros avançados de busca e conta com um sistema de autenticação e permissões de usuários (Comum e Administrador).
-
 ##### 🤖 Observação: Criado com auxilio do copilot no VSCode
 
 ## 🚀 Funcionalidades
@@ -15,6 +15,8 @@ Gestão de Programação (CRUD): Adicionar, visualizar, editar e excluir agendam
 Planilha mensal: Administradores podem selecionar qualquer usuário, inclusive a própria conta, e um mês para baixar a programação em formato Excel.
 
 Perfil do usuário: Cadastro de nome completo, matrícula da empresa, escritório e e-mail. Nome, matrícula e escritório são preenchidos automaticamente nas novas programações.
+
+Configurações da conta: Usuários podem atualizar o nome, matrícula, escritório, e-mail e nome de usuário, além de trocar a senha informando a senha atual.
 
 Recuperação de senha: Envio de link temporário para o e-mail cadastrado. A senha continua armazenada somente como hash e pode ser exibida temporariamente nos formulários de senha.
 
@@ -146,3 +148,4 @@ gunicorn --bind 0.0.0.0:$PORT app:app
 ### Observação importante
 
 O SQLite é adequado para desenvolvimento local, mas não é recomendado como banco primário em produção em nuvem, pois arquivos locais podem ser apagados ou reinicializados entre deploys.
+

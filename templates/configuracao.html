@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Configurações da conta</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 50px; background-color: #f4f7f6; }
+        form { background: #fff; padding: 20px; border-radius: 8px; max-width: 500px; margin: 0 auto 20px; }
+        input { width: 100%; padding: 8px; margin: 8px 0; box-sizing: border-box; }
+        button { background-color: #007bff; color: white; padding: 10px; border: 0; border-radius: 4px; cursor: pointer; }
+        .senha { display: flex; gap: 8px; }
+        .senha input { flex: 1; }
+        .senha button { white-space: nowrap; }
+        li { color: #b00020; }
+        a { color: #666; }
+    </style>
+</head>
+<body>
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}<ul>{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>{% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('configuracao') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <h1>Configurações da conta</h1>
+        <p>As alterações no perfil serão aplicadas às novas programações. Registros existentes não serão alterados.</p>
+
+        <label for="nome_completo">Nome completo</label>
+        <input id="nome_completo" name="nome_completo" value="{{ user.nome_completo or '' }}" autocomplete="name" minlength="3" maxlength="150" required>
+
+        <label for="matricula">Matrícula da empresa</label>
+        <input id="matricula" name="matricula" value="{{ user.matricula or '' }}" maxlength="30" required>
+
+        <label for="escritorio">Escritório</label>
+        <input id="escritorio" name="escritorio" value="{{ user.escritorio or '' }}" maxlength="100" required>
+
+        <label for="email">E-mail</label>
+        <input id="email" type="email" name="email" value="{{ user.email or '' }}" autocomplete="email" maxlength="254" required>
+
+        <label for="username">Usuário</label>
+        <input id="username" name="username" value="{{ user.username }}" autocomplete="username" minlength="3" maxlength="50" required>
+
+        <button type="submit">Salvar dados</button>
+    </form>
+
+    <form method="POST" action="{{ url_for('alterar_senha') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <h2>Redefinir senha</h2>
+        <label for="senha_atual">Senha atual</label>
+        <div class="senha">
+            <input id="senha_atual" type="password" name="senha_atual" autocomplete="current-password" required>
+            <button type="button" class="mostrar-senha" aria-pressed="false">Mostrar</button>
+        </div>
+
+        <label for="nova_senha">Nova senha (12 a 128 caracteres)</label>
+        <div class="senha">
+            <input id="nova_senha" type="password" name="nova_senha" autocomplete="new-password" minlength="12" maxlength="128" required>
+            <button type="button" class="mostrar-senha" aria-pressed="false">Mostrar</button>
+        </div>
+
+        <label for="confirmar_senha">Confirmar nova senha</label>
+        <div class="senha">
+            <input id="confirmar_senha" type="password" name="confirmar_senha" autocomplete="new-password" minlength="12" maxlength="128" required>
+            <button type="button" class="mostrar-senha" aria-pressed="false">Mostrar</button>
+        </div>
+
+        <button type="submit">Alterar senha</button>
+    </form>
+
+    <p style="text-align: center;"><a href="{{ url_for('index') }}">Voltar para a programação</a></p>
+
+    <script>
+        document.querySelectorAll('.mostrar-senha').forEach((button) => {
+            button.addEventListener('click', () => {
+                const password = button.parentElement.querySelector('input');
+                const visible = password.type === 'password';
+                password.type = visible ? 'text' : 'password';
+                button.textContent = visible ? 'Ocultar' : 'Mostrar';
+                button.setAttribute('aria-pressed', String(visible));
+            });
+        });
+    </script>
+</body>
+</html>
