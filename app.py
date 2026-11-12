@@ -402,8 +402,8 @@ def init_db():
                 conn.execute('DROP TABLE programacao')
                 conn.execute('ALTER TABLE programacao_new RENAME TO programacao')
 
-        admin_username = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
-        if admin_username:
+        admin_usernames = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
+        if admin_usernames:
             # Divide os nomes por vírgula e remove espaços em branco
             lista_admins = [nome.strip() for nome in admin_usernames.split(',') if nome.strip()]
             for admin in lista_admins:
