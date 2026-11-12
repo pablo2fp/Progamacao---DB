@@ -410,7 +410,7 @@ def init_db():
                 execute_query(
                 conn,
                 "UPDATE usuarios SET role = 'admin' WHERE lower(username) = ?",
-                (admin_username,),
+                (admin,),
             )
         conn.commit()
     finally:
