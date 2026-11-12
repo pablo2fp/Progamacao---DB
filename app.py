@@ -404,7 +404,10 @@ def init_db():
 
         admin_username = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
         if admin_username:
-            execute_query(
+            # Divide os nomes por vírgula e remove espaços em branco
+            lista_admins = [nome.strip() for nome in admin_usernames.split(',') if nome.strip()]
+            for admin in lista_admins:
+                execute_query(
                 conn,
                 "UPDATE usuarios SET role = 'admin' WHERE lower(username) = ?",
                 (admin_username,),
