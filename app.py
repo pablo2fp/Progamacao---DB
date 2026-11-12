@@ -748,6 +748,104 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/configuracao', methods=('GET', 'POST'))
+@login_required
+def configuracao():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip().lower()
+        nome_completo = ' '.join(request.form.get('nome_completo', '').split())
+        matricula = request.form.get('matricula', '').strip()
+        escritorio = request.form.get('escritorio', '').strip()
+        email = request.form.get('email', '').strip().lower()
+
+        if not 3 <= len(username) <= 50:
+            flash('O usuário deve ter entre 3 e 50 caracteres.')
+        elif not 3 <= len(nome_completo) <= 150:
+            flash('Informe seu nome completo (de 3 a 150 caracteres).')
+        elif not 1 <= len(matricula) <= 30:
+            flash('A matrícula deve ter entre 1 e 30 caracteres.')
+        elif not 1 <= len(escritorio) <= 100:
+            flash('Informe um escritório válido (até 100 caracteres).')
+        elif len(email) > 254 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
+            flash('Informe um endereço de e-mail válido.')
+        else:
+            conn = get_db_connection()
+            try:
+                execute_query(
+                    conn,
+                    '''
+                    UPDATE usuarios
+                    SET username = ?, nome_completo = ?, matricula = ?, escritorio = ?, email = ?
+                    WHERE id = ?
+                    ''',
+                    (username, nome_completo, matricula, escritorio, email, g.user['id']),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                flash('Esse nome de usuário ou e-mail já está em uso.')
+            except Exception as exc:
+                if is_postgres_db():
+                    import psycopg2
+                    if isinstance(exc, psycopg2.IntegrityError):
+                        conn.rollback()
+                        flash('Esse nome de usuário ou e-mail já está em uso.')
+                    else:
+                        raise
+                else:
+                    raise
+            else:
+                flash('Dados da conta atualizados com sucesso.')
+                return redirect(url_for('configuracao'))
+            finally:
+                conn.close()
+
+    return render_template('configuracao.html', user=g.user)
+
+
+@app.route('/configuracao/senha', methods=('POST',))
+@login_required
+def alterar_senha():
+    current_password = request.form.get('senha_atual', '')
+    new_password = request.form.get('nova_senha', '')
+    confirm_password = request.form.get('confirmar_senha', '')
+    conn = get_db_connection()
+    try:
+        user = execute_query(
+            conn,
+            'SELECT password_hash FROM usuarios WHERE id = ?',
+            (g.user['id'],),
+        ).fetchone()
+        if user is None or not check_password_hash(user['password_hash'], current_password):
+            flash('A senha atual está incorreta.')
+            return redirect(url_for('configuracao'))
+        if not 12 <= len(new_password) <= 128:
+            flash('A nova senha deve ter entre 12 e 128 caracteres.')
+            return redirect(url_for('configuracao'))
+        if new_password != confirm_password:
+            flash('A confirmação da nova senha não corresponde.')
+            return redirect(url_for('configuracao'))
+
+        execute_query(
+            conn,
+            '''
+            UPDATE usuarios
+            SET password_hash = ?, password_reset_token_hash = NULL
+            WHERE id = ?
+            ''',
+            (generate_password_hash(new_password), g.user['id']),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    session.clear()
+    session['user_id'] = g.user['id']
+    csrf_token()
+    flash('Senha alterada com sucesso.')
+    return redirect(url_for('configuracao'))
+
+
 @app.route('/perfil/escritorio', methods=('POST',))
 @login_required
 def atualizar_escritorio():
