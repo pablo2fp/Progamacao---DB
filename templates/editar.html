@@ -21,7 +21,7 @@
         <input type="text" name="nome" value="{{ programacao.nome }}" required>
 
         <label>Matrícula:</label>
-        <input type="number" name="matricula" value="{{ programacao.matricula }}" required>
+        <input type="text" name="matricula" value="{{ programacao.matricula }}" required>
 
         <label>Escritório:</label>
         <input type="text" name="escritorio" value="{{ programacao.escritorio }}" required>
@@ -31,6 +31,12 @@
         
         <label>Atividade:</label>
         <textarea name="atividade" required>{{ programacao.atividade }}</textarea>
+
+        <label>Tipo de atividade:</label>
+        <select name="tipo_atividade" required>
+            <option value="Campo" {% if programacao.tipo_atividade == 'Campo' %}selected{% endif %}>Campo</option>
+            <option value="Escritório" {% if programacao.tipo_atividade == 'Escritório' %}selected{% endif %}>Escritório</option>
+        </select>
 
         <label>Status:</label>
         <select name="status">

@@ -1,6 +1,7 @@
 # Sistema de Programação Mensal
 
 Uma aplicação web desenvolvida em Python com o microframework Flask para gerenciar a escala e as atividades mensais de técnicos em diversos escritórios. O sistema permite o cadastro de atividades, filtros avançados de busca e conta com um sistema de autenticação e permissões de usuários (Comum e Administrador).
+
 ##### 🤖 Observação: Criado com auxilio do copilot no VSCode
 
 ## 🚀 Funcionalidades
@@ -9,7 +10,13 @@ Autenticação Segura: Registro e login de usuários com senhas criptografadas (
 
 Controle de Acesso: Diferenciação entre usuários comuns (que podem editar/excluir apenas os próprios registros) e administradores (com controle total).
 
-Gestão de Programação (CRUD): Adicionar, visualizar, editar e excluir agendamentos de técnicos.
+Gestão de Programação (CRUD): Adicionar, visualizar, editar e excluir agendamentos de técnicos, indicando se a atividade será em campo ou no escritório. A listagem também pode ser filtrada pelo tipo de atividade.
+
+Planilha mensal: Administradores podem selecionar qualquer usuário, inclusive a própria conta, e um mês para baixar a programação em formato Excel.
+
+Perfil do usuário: Cadastro de nome completo, matrícula da empresa, escritório e e-mail. Nome, matrícula e escritório são preenchidos automaticamente nas novas programações.
+
+Recuperação de senha: Envio de link temporário para o e-mail cadastrado. A senha continua armazenada somente como hash e pode ser exibida temporariamente nos formulários de senha.
 
 Filtros de Busca: Pesquisa por texto (nome, matrícula, atividade), por escritório, status da atividade e intervalo de datas.
 
@@ -78,6 +85,21 @@ FLASK_ADMIN_USERNAME=admin
 
 
 🚨 IMPORTANTE: Nunca faça o commit do seu arquivo .env ou do banco de dados programacao.db para o GitHub. Certifique-se de que eles estejam listados no seu arquivo .gitignore.
+
+### Configuração de e-mail para recuperação de senha
+
+Para habilitar o envio dos links de redefinição, configure também as variáveis SMTP:
+
+```text
+SMTP_HOST=smtp.seuprovedor.com
+SMTP_PORT=587
+SMTP_USERNAME=usuario-smtp
+SMTP_PASSWORD=senha-smtp
+SMTP_FROM=Sistema de Programação <nao-responda@seu-dominio.com>
+SMTP_USE_TLS=1
+```
+
+O link é válido por uma hora e pode ser usado uma única vez. Sem `SMTP_HOST` e `SMTP_FROM`, a recuperação não poderá enviar mensagens.
 
 ### 5. Inicie a Aplicação
 ```text
