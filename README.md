@@ -2,6 +2,8 @@
 
 Uma aplicação web desenvolvida em Python com o microframework Flask para gerenciar a escala e as atividades mensais de técnicos em diversos escritórios. O sistema permite o cadastro de atividades, filtros avançados de busca e conta com um sistema de autenticação e permissões de usuários (Comum e Administrador).
 
+##### 🤖 Observação: Criado com auxilio do copilot no VSCode
+
 ## 🚀 Funcionalidades
 
 Autenticação Segura: Registro e login de usuários com senhas criptografadas (hashes).
