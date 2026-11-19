@@ -32,6 +32,9 @@
         <label>Atividade:</label>
         <textarea name="atividade" required>{{ programacao.atividade }}</textarea>
 
+        <label for="local-atividade">Local da atividade:</label>
+        <input id="local-atividade" type="text" name="local_atividade" value="{{ programacao.local_atividade }}" maxlength="200" required>
+
         <label>Tipo de atividade:</label>
         <select name="tipo_atividade" required>
             <option value="Campo" {% if programacao.tipo_atividade == 'Campo' %}selected{% endif %}>Campo</option>
