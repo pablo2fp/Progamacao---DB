@@ -40,7 +40,12 @@
     <form action="{{ url_for('atualizar_escritorio') }}" method="POST">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <label for="perfil-escritorio">Escritório</label>
-        <input id="perfil-escritorio" name="escritorio" maxlength="100" required>
+        <select id="perfil-escritorio" name="escritorio" required>
+            <option value="">Selecione seu escritório</option>
+            {% for escritorio in escritorios_disponiveis %}
+            <option value="{{ escritorio }}">{{ escritorio }}</option>
+            {% endfor %}
+        </select>
         <button type="submit">Salvar escritório</button>
     </form>
     {% endif %}
@@ -62,6 +67,9 @@
         
         <label>Atividade:</label>
         <textarea name="atividade" required></textarea>
+
+        <label for="local-atividade">Local da atividade:</label>
+        <input id="local-atividade" type="text" name="local_atividade" maxlength="200" required>
 
         <label>Tipo de atividade:</label>
         <select name="tipo_atividade" required>
@@ -137,6 +145,7 @@
         </div>
         <div>
             <button type="submit">Baixar planilha Excel</button>
+            <button type="submit" formaction="{{ url_for('relatorio_campo') }}">Baixar relatório Word (campo)</button>
         </div>
     </form>
     {% endif %}
@@ -150,6 +159,7 @@
                 <th>Matricula</th>
                 <th>Tipo de atividade</th>
                 <th>Atividade</th>
+                <th>Local da atividade</th>
                 <th>Status</th>
                 <th>Criado em</th>
                 <th>Ações</th>
@@ -164,6 +174,7 @@
                 <td>{{ p.matricula }}</td>
                 <td>{{ p.tipo_atividade }}</td>
                 <td>{{ p.atividade }}</td>
+                <td>{{ p.local_atividade }}</td>
                 <td><strong>{{ p.status }}</strong></td>
                 <td>{{ p.data_criacao }}</td>
                 <td>
@@ -179,7 +190,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="9">Nenhuma programação corresponde aos filtros.</td></tr>
+            <tr><td colspan="10">Nenhuma programação corresponde aos filtros.</td></tr>
             {% endfor %}
         </tbody>
     </table>
