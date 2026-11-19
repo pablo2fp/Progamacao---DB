@@ -23,6 +23,8 @@ from flask import (
     session,
     url_for,
 )
+from docx import Document
+from docx.oxml.ns import qn
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -46,6 +48,26 @@ app.config['PREFERRED_URL_SCHEME'] = 'https' if app.config['SESSION_COOKIE_SECUR
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, 'programacao.db')
+DOCX_TEMPLATE_FILE = os.path.join(BASE_DIR, 'modelo_programacao.docx')
+MESES_PT_BR = (
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+    'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+)
+ESCRITORIOS = (
+    'Abaiara',
+    'Altaneira',
+    'Barbalha',
+    'Caririaçu',
+    'Crato',
+    'Farias Brito',
+    'Granjeiro',
+    'Jardim',
+    'Juazeiro do Norte',
+    'Missão Velha',
+    'Nova Olinda',
+    'Santana do Cariri',
+    'Várzea Alegre',
+)
 
 
 def is_postgres_db():
@@ -92,6 +114,7 @@ def init_db():
                     nome_completo TEXT NOT NULL,
                     matricula TEXT NOT NULL,
                     escritorio TEXT NOT NULL,
+                    tipo_vinculo TEXT NOT NULL CHECK (tipo_vinculo IN ('Efetivo', 'Bolsista', 'Cedido')),
                     email TEXT NOT NULL UNIQUE,
                     password_reset_token_hash TEXT,
                     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
@@ -109,6 +132,7 @@ def init_db():
                     escritorio TEXT NOT NULL,
                     data_trabalho DATE NOT NULL,
                     atividade TEXT NOT NULL,
+                    local_atividade TEXT NOT NULL DEFAULT '',
                     tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                     status TEXT DEFAULT 'Planejado',
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -140,6 +164,7 @@ def init_db():
                         escritorio TEXT NOT NULL,
                         data_trabalho DATE NOT NULL,
                         atividade TEXT NOT NULL,
+                        local_atividade TEXT NOT NULL DEFAULT '',
                         tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                         status TEXT DEFAULT 'Planejado',
                         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -150,8 +175,8 @@ def init_db():
                 execute_query(
                     conn,
                     '''
-                    INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade, tipo_atividade, status, data_criacao, usuario_id)
-                    SELECT id, titulo, '0', '', descricao, '', 'Escritório', 'Planejado', CURRENT_TIMESTAMP, NULL FROM programacao_legacy
+                    INSERT INTO programacao (id, nome, matricula, escritorio, data_trabalho, atividade, local_atividade, tipo_atividade, status, data_criacao, usuario_id)
+                    SELECT id, titulo, '0', '', descricao, '', '', 'Escritório', 'Planejado', CURRENT_TIMESTAMP, NULL FROM programacao_legacy
                     '''
                 )
                 execute_query(conn, 'DROP TABLE programacao_legacy')
@@ -171,6 +196,7 @@ def init_db():
             missing_columns = {
                 'matricula': "TEXT NOT NULL DEFAULT '0'",
                 'escritorio': "TEXT NOT NULL DEFAULT ''",
+                'local_atividade': "TEXT NOT NULL DEFAULT ''",
                 'tipo_atividade': "TEXT NOT NULL DEFAULT 'Escritório'",
                 'status': "TEXT DEFAULT 'Planejado'",
                 'data_criacao': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
@@ -222,6 +248,7 @@ def init_db():
                 'nome_completo': 'TEXT',
                 'matricula': 'TEXT',
                 'escritorio': 'TEXT',
+                'tipo_vinculo': "TEXT CHECK (tipo_vinculo IN ('Efetivo', 'Bolsista', 'Cedido'))",
                 'email': 'TEXT',
                 'password_reset_token_hash': 'TEXT',
             }.items():
@@ -257,6 +284,7 @@ def init_db():
                     nome_completo TEXT NOT NULL,
                     matricula TEXT NOT NULL,
                     escritorio TEXT NOT NULL,
+                    tipo_vinculo TEXT NOT NULL CHECK (tipo_vinculo IN ('Efetivo', 'Bolsista', 'Cedido')),
                     email TEXT NOT NULL UNIQUE,
                     password_reset_token_hash TEXT,
                     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
@@ -273,6 +301,7 @@ def init_db():
                     escritorio TEXT NOT NULL,
                     data_trabalho DATE NOT NULL,
                     atividade TEXT NOT NULL,
+                    local_atividade TEXT NOT NULL DEFAULT '',
                     tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                     status TEXT DEFAULT 'Planejado',
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -295,6 +324,7 @@ def init_db():
                         escritorio TEXT NOT NULL,
                         data_trabalho DATE NOT NULL,
                         atividade TEXT NOT NULL,
+                        local_atividade TEXT NOT NULL DEFAULT '',
                         tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                         status TEXT DEFAULT 'Planejado',
                         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -306,9 +336,9 @@ def init_db():
                     '''
                     INSERT INTO programacao (
                         id, nome, matricula, escritorio, data_trabalho,
-                        atividade, tipo_atividade, status, data_criacao, usuario_id
+                        atividade, local_atividade, tipo_atividade, status, data_criacao, usuario_id
                     )
-                    SELECT id, titulo, '0', '', descricao, '', 'Escritório', 'Planejado', CURRENT_TIMESTAMP, NULL
+                    SELECT id, titulo, '0', '', descricao, '', '', 'Escritório', 'Planejado', CURRENT_TIMESTAMP, NULL
                     FROM programacao_legacy
                     '''
                 )
@@ -320,6 +350,7 @@ def init_db():
             missing_columns = {
                 'matricula': "TEXT NOT NULL DEFAULT '0'",
                 'escritorio': "TEXT NOT NULL DEFAULT ''",
+                'local_atividade': "TEXT NOT NULL DEFAULT ''",
                 'tipo_atividade': "TEXT NOT NULL DEFAULT 'Escritório'",
                 'status': "TEXT DEFAULT 'Planejado'",
                 'data_criacao': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
@@ -346,6 +377,7 @@ def init_db():
                 'nome_completo': 'TEXT',
                 'matricula': 'TEXT',
                 'escritorio': 'TEXT',
+                'tipo_vinculo': "TEXT CHECK (tipo_vinculo IN ('Efetivo', 'Bolsista', 'Cedido'))",
                 'email': 'TEXT',
                 'password_reset_token_hash': 'TEXT',
             }.items():
@@ -381,6 +413,7 @@ def init_db():
                         escritorio TEXT NOT NULL,
                         data_trabalho DATE NOT NULL,
                         atividade TEXT NOT NULL,
+                        local_atividade TEXT NOT NULL DEFAULT '',
                         tipo_atividade TEXT NOT NULL DEFAULT 'Escritório',
                         status TEXT DEFAULT 'Planejado',
                         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -392,25 +425,22 @@ def init_db():
                     '''
                     INSERT INTO programacao_new (
                         id, nome, matricula, escritorio, data_trabalho,
-                        atividade, tipo_atividade, status, data_criacao, usuario_id
+                        atividade, local_atividade, tipo_atividade, status, data_criacao, usuario_id
                     )
                     SELECT id, nome, CAST(matricula AS TEXT), escritorio, data_trabalho,
-                           atividade, tipo_atividade, status, data_criacao, usuario_id
+                           atividade, local_atividade, tipo_atividade, status, data_criacao, usuario_id
                     FROM programacao
                     '''
                 )
                 conn.execute('DROP TABLE programacao')
                 conn.execute('ALTER TABLE programacao_new RENAME TO programacao')
 
-        admin_usernames = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
-        if admin_usernames:
-            # Divide os nomes por vírgula e remove espaços em branco
-            lista_admins = [nome.strip() for nome in admin_usernames.split(',') if nome.strip()]
-            for admin in lista_admins:
-                execute_query(
+        admin_username = os.environ.get('FLASK_ADMIN_USERNAME', '').strip().lower()
+        if admin_username:
+            execute_query(
                 conn,
                 "UPDATE usuarios SET role = 'admin' WHERE lower(username) = ?",
-                (admin,),
+                (admin_username,),
             )
         conn.commit()
     finally:
@@ -460,7 +490,8 @@ def load_logged_in_user():
             g.user = execute_query(
                 conn,
                 '''
-                SELECT id, username, nome_completo, matricula, escritorio, email, role
+                SELECT id, username, nome_completo, matricula, escritorio,
+                       tipo_vinculo, email, role
                 FROM usuarios WHERE id = ?
                 ''',
                 (user_id,),
@@ -545,6 +576,7 @@ def register():
         nome_completo = ' '.join(request.form.get('nome_completo', '').split())
         matricula = request.form.get('matricula', '').strip()
         escritorio = request.form.get('escritorio', '').strip()
+        tipo_vinculo = request.form.get('tipo_vinculo', '')
         email = request.form.get('email', '').strip().lower()
         error = None
         if not 3 <= len(username) <= 50:
@@ -553,8 +585,10 @@ def register():
             error = 'Informe seu nome completo (de 3 a 150 caracteres).'
         elif not 1 <= len(matricula) <= 30:
             error = 'A matrícula deve ter entre 1 e 30 caracteres.'
-        elif not 1 <= len(escritorio) <= 100:
-            error = 'Informe um escritório válido (até 100 caracteres).'
+        elif escritorio not in ESCRITORIOS:
+            error = 'Selecione um escritório válido.'
+        elif tipo_vinculo not in ('Efetivo', 'Bolsista', 'Cedido'):
+            error = 'Selecione um tipo de vínculo válido.'
         elif len(email) > 254 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
             error = 'Informe um endereço de e-mail válido.'
         elif not 12 <= len(password) <= 128:
@@ -567,8 +601,10 @@ def register():
                     cursor = execute_query(
                         conn,
                         '''
-                        INSERT INTO usuarios (username, password_hash, nome_completo, matricula, escritorio, email)
-                        VALUES (?, ?, ?, ?, ?, ?) RETURNING id
+                        INSERT INTO usuarios (
+                            username, password_hash, nome_completo, matricula,
+                            escritorio, tipo_vinculo, email
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
                         ''',
                         (
                             username,
@@ -576,6 +612,7 @@ def register():
                             nome_completo,
                             matricula,
                             escritorio,
+                            tipo_vinculo,
                             email,
                         ),
                     )
@@ -584,8 +621,10 @@ def register():
                     cursor = execute_query(
                         conn,
                         '''
-                        INSERT INTO usuarios (username, password_hash, nome_completo, matricula, escritorio, email)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO usuarios (
+                            username, password_hash, nome_completo, matricula,
+                            escritorio, tipo_vinculo, email
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         ''',
                         (
                             username,
@@ -593,6 +632,7 @@ def register():
                             nome_completo,
                             matricula,
                             escritorio,
+                            tipo_vinculo,
                             email,
                         ),
                     )
@@ -618,7 +658,7 @@ def register():
 
         flash(error)
 
-    return render_template('register.html')
+    return render_template('register.html', escritorios=ESCRITORIOS)
 
 
 @app.route('/recuperar-senha', methods=('GET', 'POST'))
@@ -759,6 +799,7 @@ def configuracao():
         nome_completo = ' '.join(request.form.get('nome_completo', '').split())
         matricula = request.form.get('matricula', '').strip()
         escritorio = request.form.get('escritorio', '').strip()
+        tipo_vinculo = request.form.get('tipo_vinculo', '')
         email = request.form.get('email', '').strip().lower()
 
         if not 3 <= len(username) <= 50:
@@ -767,8 +808,10 @@ def configuracao():
             flash('Informe seu nome completo (de 3 a 150 caracteres).')
         elif not 1 <= len(matricula) <= 30:
             flash('A matrícula deve ter entre 1 e 30 caracteres.')
-        elif not 1 <= len(escritorio) <= 100:
-            flash('Informe um escritório válido (até 100 caracteres).')
+        elif escritorio not in ESCRITORIOS:
+            flash('Selecione um escritório válido.')
+        elif tipo_vinculo not in ('Efetivo', 'Bolsista', 'Cedido'):
+            flash('Selecione um tipo de vínculo válido.')
         elif len(email) > 254 or not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email):
             flash('Informe um endereço de e-mail válido.')
         else:
@@ -778,10 +821,14 @@ def configuracao():
                     conn,
                     '''
                     UPDATE usuarios
-                    SET username = ?, nome_completo = ?, matricula = ?, escritorio = ?, email = ?
+                    SET username = ?, nome_completo = ?, matricula = ?, escritorio = ?,
+                        tipo_vinculo = ?, email = ?
                     WHERE id = ?
                     ''',
-                    (username, nome_completo, matricula, escritorio, email, g.user['id']),
+                    (
+                        username, nome_completo, matricula, escritorio,
+                        tipo_vinculo, email, g.user['id'],
+                    ),
                 )
                 conn.commit()
             except sqlite3.IntegrityError:
@@ -803,7 +850,7 @@ def configuracao():
             finally:
                 conn.close()
 
-    return render_template('configuracao.html', user=g.user)
+    return render_template('configuracao.html', user=g.user, escritorios=ESCRITORIOS)
 
 
 @app.route('/configuracao/senha', methods=('POST',))
@@ -853,8 +900,8 @@ def alterar_senha():
 @login_required
 def atualizar_escritorio():
     escritorio = request.form.get('escritorio', '').strip()
-    if not 1 <= len(escritorio) <= 100:
-        flash('Informe um escritório válido (até 100 caracteres).')
+    if escritorio not in ESCRITORIOS:
+        flash('Selecione um escritório válido.')
         return redirect(url_for('index'))
 
     conn = get_db_connection()
@@ -888,9 +935,10 @@ def index():
         pattern = f'%{escaped_search}%'
         filters.append(
             "(nome LIKE ? ESCAPE '\\' OR CAST(matricula AS TEXT) LIKE ? ESCAPE '\\' "
-            "OR escritorio LIKE ? ESCAPE '\\' OR atividade LIKE ? ESCAPE '\\')"
+            "OR escritorio LIKE ? ESCAPE '\\' OR atividade LIKE ? ESCAPE '\\' "
+            "OR local_atividade LIKE ? ESCAPE '\\')"
         )
-        values.extend([pattern] * 4)
+        values.extend([pattern] * 5)
 
     if escritorio_filter:
         filters.append('escritorio = ?')
@@ -929,7 +977,13 @@ def index():
         filters.append('data_trabalho <= ?')
         values.append(date_to)
 
+    if g.user['role'] != 'admin':
+        filters.append('usuario_id = ?')
+        values.append(g.user['id'])
+
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ''
+    scope_clause = '' if g.user['role'] == 'admin' else 'usuario_id = ? AND '
+    scope_values = () if g.user['role'] == 'admin' else (g.user['id'],)
     conn = get_db_connection()
     try:
         programacoes = execute_query(
@@ -939,13 +993,15 @@ def index():
         ).fetchall()
         escritorios = execute_query(
             conn,
-            "SELECT DISTINCT escritorio FROM programacao "
-            "WHERE escritorio != '' ORDER BY escritorio",
+            f"SELECT DISTINCT escritorio FROM programacao "
+            f"WHERE {scope_clause}escritorio != '' ORDER BY escritorio",
+            scope_values,
         ).fetchall()
         statuses = execute_query(
             conn,
-            "SELECT DISTINCT status FROM programacao "
-            "WHERE status IS NOT NULL AND status != '' ORDER BY status",
+            f"SELECT DISTINCT status FROM programacao "
+            f"WHERE {scope_clause}status IS NOT NULL AND status != '' ORDER BY status",
+            scope_values,
         ).fetchall()
         technicians = []
         if g.user['role'] == 'admin':
@@ -976,6 +1032,7 @@ def index():
         escritorios=escritorios,
         statuses=statuses,
         technicians=technicians,
+        escritorios_disponiveis=ESCRITORIOS,
         mes_atual=date.today().strftime('%Y-%m'),
     )
 
@@ -1008,7 +1065,7 @@ def planilha_mensal():
             conn,
             '''
             SELECT id, COALESCE(NULLIF(nome_completo, ''), username) AS nome_completo,
-                   username, matricula
+                   username, matricula, escritorio, tipo_vinculo
             FROM usuarios WHERE id = ? AND role IN ('user', 'admin')
             ''',
             (technician_id,),
@@ -1019,7 +1076,7 @@ def planilha_mensal():
             conn,
             '''
             SELECT data_trabalho, escritorio, nome, matricula, tipo_atividade,
-                   atividade, status
+                   atividade, local_atividade, status
             FROM programacao
             WHERE usuario_id = ? AND data_trabalho >= ? AND data_trabalho < ?
             ORDER BY data_trabalho, id
@@ -1034,7 +1091,7 @@ def planilha_mensal():
     worksheet.title = f'Programação {month_value}'
     worksheet.append([
         'Data', 'Escritório', 'Nome do técnico', 'Matrícula',
-        'Tipo de atividade', 'Atividade', 'Status',
+        'Tipo de atividade', 'Atividade', 'Local da atividade', 'Status',
     ])
     for cell in worksheet[1]:
         cell.font = Font(bold=True)
@@ -1053,6 +1110,7 @@ def planilha_mensal():
             programacao['matricula'],
             programacao['tipo_atividade'],
             programacao['atividade'],
+            programacao['local_atividade'],
             programacao['status'],
         ])
         worksheet.cell(worksheet.max_row, 1).number_format = 'dd/mm/yyyy'
@@ -1062,7 +1120,9 @@ def planilha_mensal():
 
     worksheet.freeze_panes = 'A2'
     worksheet.auto_filter.ref = worksheet.dimensions
-    for column, width in {'A': 14, 'B': 24, 'C': 30, 'D': 18, 'E': 22, 'F': 50, 'G': 18}.items():
+    for column, width in {
+        'A': 14, 'B': 24, 'C': 30, 'D': 18, 'E': 22, 'F': 50, 'G': 35, 'H': 18,
+    }.items():
         worksheet.column_dimensions[column].width = width
 
     output = BytesIO()
@@ -1073,6 +1133,106 @@ def planilha_mensal():
         as_attachment=True,
         download_name=f'programacao_{technician["username"]}_{month_value}.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+
+@app.route('/admin/relatorio-campo.docx')
+@login_required
+def relatorio_campo():
+    if g.user['role'] != 'admin':
+        abort(403)
+
+    technician_id = request.args.get('tecnico', type=int)
+    month_value = request.args.get('mes', date.today().strftime('%Y-%m'))
+    try:
+        month_start = date.fromisoformat(f'{month_value}-01')
+    except ValueError:
+        abort(400, description='Informe o mês no formato AAAA-MM.')
+    if len(month_value) != 7 or month_start.strftime('%Y-%m') != month_value:
+        abort(400, description='Informe o mês no formato AAAA-MM.')
+    if technician_id is None:
+        abort(400, description='Selecione um técnico.')
+    if not os.path.isfile(DOCX_TEMPLATE_FILE):
+        raise RuntimeError(f'Modelo Word não encontrado: {DOCX_TEMPLATE_FILE}')
+
+    next_month = (
+        date(month_start.year + 1, 1, 1)
+        if month_start.month == 12
+        else date(month_start.year, month_start.month + 1, 1)
+    )
+    conn = get_db_connection()
+    try:
+        technician = execute_query(
+            conn,
+            '''
+            SELECT id, COALESCE(NULLIF(nome_completo, ''), username) AS nome_completo,
+                   username, matricula, escritorio, tipo_vinculo
+            FROM usuarios WHERE id = ? AND role IN ('user', 'admin')
+            ''',
+            (technician_id,),
+        ).fetchone()
+        if technician is None:
+            abort(404)
+        programacoes = execute_query(
+            conn,
+            '''
+            SELECT data_trabalho, atividade, local_atividade
+            FROM programacao
+            WHERE usuario_id = ? AND tipo_atividade = 'Campo'
+              AND data_trabalho >= ? AND data_trabalho < ?
+            ORDER BY data_trabalho, id
+            ''',
+            (technician_id, month_start.isoformat(), next_month.isoformat()),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    document = Document(DOCX_TEMPLATE_FILE)
+    labels = {
+        'Programação de campo do mês de:': (
+            f'{MESES_PT_BR[month_start.month - 1]} de {month_start.year}'
+        ),
+        'Nome do técnico:': technician['nome_completo'],
+        'Matrícula:': technician['matricula'],
+        'Município:': technician['escritorio'] or 'Não informado',
+        'Tipo de vínculo:': technician['tipo_vinculo'] or 'Não informado',
+    }
+    found_labels = set()
+    for paragraph in document.paragraphs:
+        for label, value in labels.items():
+            if paragraph.text.startswith(label):
+                paragraph.add_run(f' {value}')
+                found_labels.add(label)
+                break
+    if found_labels != set(labels) or not document.tables:
+        raise RuntimeError('O modelo Word não contém todos os campos esperados.')
+
+    for element in document._element.iter():
+        width = element.get(qn('w:w'))
+        if width is not None and re.fullmatch(r'-?\d+(?:\.\d+)?', width):
+            element.set(qn('w:w'), str(round(float(width))))
+
+    table = document.tables[0]
+    for programacao in programacoes:
+        raw_date = programacao['data_trabalho']
+        work_date = (
+            raw_date
+            if isinstance(raw_date, (date, datetime))
+            else date.fromisoformat(str(raw_date)[:10])
+        )
+        row = table.add_row()
+        row.cells[0].text = work_date.strftime('%d/%m/%Y')
+        row.cells[1].text = programacao['atividade']
+        row.cells[2].text = programacao['local_atividade']
+
+    output = BytesIO()
+    document.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f'programacao_campo_{technician_id}_{month_value}.docx',
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     )
 
 
@@ -1087,6 +1247,7 @@ def add():
     matricula = g.user['matricula'] or request.form.get('matricula', '').strip()
     data_trabalho = request.form.get('data_trabalho', '').strip()
     atividade = request.form.get('atividade', '').strip()
+    local_atividade = request.form.get('local_atividade', '').strip()
     if not nome or len(nome) > 150 or not matricula or len(matricula) > 30:
         abort(400, description='Informe um nome e uma matrícula válidos.')
     escritorio = (g.user['escritorio'] or '').strip()
@@ -1097,6 +1258,8 @@ def add():
         abort(400, description='Informe uma data válida no formato AAAA-MM-DD.')
     if not atividade:
         abort(400, description='Informe a atividade.')
+    if not local_atividade or len(local_atividade) > 200:
+        abort(400, description='Informe um local da atividade válido (até 200 caracteres).')
 
     conn = get_db_connection()
     try:
@@ -1105,8 +1268,8 @@ def add():
             '''
             INSERT INTO programacao (
                 nome, matricula, escritorio, data_trabalho, atividade,
-                tipo_atividade, data_criacao, usuario_id
-            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+                local_atividade, tipo_atividade, data_criacao, usuario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             ''',
             (
                 nome,
@@ -1114,6 +1277,7 @@ def add():
                 escritorio,
                 data_trabalho,
                 atividade,
+                local_atividade,
                 tipo_atividade,
                 g.user['id'],
             ),
@@ -1139,6 +1303,7 @@ def edit(id):
             escritorio = request.form.get('escritorio', '').strip()
             data_trabalho = request.form.get('data_trabalho', '').strip()
             atividade = request.form.get('atividade', '').strip()
+            local_atividade = request.form.get('local_atividade', '').strip()
             status = request.form.get('status', '')
             if not nome or len(nome) > 150 or not matricula or len(matricula) > 30:
                 abort(400, description='Informe um nome e uma matrícula válidos.')
@@ -1148,6 +1313,8 @@ def edit(id):
                 abort(400, description='Informe uma data válida no formato AAAA-MM-DD.')
             if not atividade:
                 abort(400, description='Informe a atividade.')
+            if not local_atividade or len(local_atividade) > 200:
+                abort(400, description='Informe um local da atividade válido (até 200 caracteres).')
             if status not in ('Planejado', 'Em Andamento', 'Concluído'):
                 abort(400, description='Selecione um status válido.')
             execute_query(
@@ -1155,7 +1322,7 @@ def edit(id):
                 '''
                 UPDATE programacao
                 SET nome = ?, matricula = ?, escritorio = ?, data_trabalho = ?,
-                    atividade = ?, tipo_atividade = ?, status = ?
+                    atividade = ?, local_atividade = ?, tipo_atividade = ?, status = ?
                 WHERE id = ? AND (? = 'admin' OR usuario_id = ?)
                 ''',
                 (
@@ -1164,6 +1331,7 @@ def edit(id):
                     escritorio,
                     data_trabalho,
                     atividade,
+                    local_atividade,
                     tipo_atividade,
                     status,
                     id,
