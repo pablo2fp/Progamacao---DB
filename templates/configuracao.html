@@ -32,7 +32,20 @@
         <input id="matricula" name="matricula" value="{{ user.matricula or '' }}" maxlength="30" required>
 
         <label for="escritorio">Escritório</label>
-        <input id="escritorio" name="escritorio" value="{{ user.escritorio or '' }}" maxlength="100" required>
+        <select id="escritorio" name="escritorio" required>
+            <option value="">Selecione seu escritório</option>
+            {% for escritorio in escritorios %}
+            <option value="{{ escritorio }}" {% if user.escritorio == escritorio %}selected{% endif %}>{{ escritorio }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="tipo_vinculo">Tipo de vínculo</label>
+        <select id="tipo_vinculo" name="tipo_vinculo" required>
+            <option value="">Selecione seu tipo de vínculo</option>
+            <option value="Efetivo" {% if user.tipo_vinculo == 'Efetivo' %}selected{% endif %}>Efetivo</option>
+            <option value="Bolsista" {% if user.tipo_vinculo == 'Bolsista' %}selected{% endif %}>Bolsista</option>
+            <option value="Cedido" {% if user.tipo_vinculo == 'Cedido' %}selected{% endif %}>Cedido</option>
+        </select>
 
         <label for="email">E-mail</label>
         <input id="email" type="email" name="email" value="{{ user.email or '' }}" autocomplete="email" maxlength="254" required>
