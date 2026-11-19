@@ -26,7 +26,19 @@
         <label for="matricula">Matrícula da empresa</label>
         <input id="matricula" name="matricula" autocomplete="off" maxlength="30" required>
         <label for="escritorio">Escritório</label>
-        <input id="escritorio" name="escritorio" autocomplete="organization" maxlength="100" required>
+        <select id="escritorio" name="escritorio" autocomplete="organization" required>
+            <option value="">Selecione seu escritório</option>
+            {% for escritorio in escritorios %}
+            <option value="{{ escritorio }}">{{ escritorio }}</option>
+            {% endfor %}
+        </select>
+        <label for="tipo_vinculo">Tipo de vínculo</label>
+        <select id="tipo_vinculo" name="tipo_vinculo" required>
+            <option value="">Selecione seu tipo de vínculo</option>
+            <option value="Efetivo">Efetivo</option>
+            <option value="Bolsista">Bolsista</option>
+            <option value="Cedido">Cedido</option>
+        </select>
         <label for="email">E-mail</label>
         <input id="email" type="email" name="email" autocomplete="email" maxlength="254" required>
         <label for="username">Usuário (3 a 50 caracteres)</label>
