@@ -1,8 +1,6 @@
-
 # Sistema de Programação Mensal
 
 Uma aplicação web desenvolvida em Python com o microframework Flask para gerenciar a escala e as atividades mensais de técnicos em diversos escritórios. O sistema permite o cadastro de atividades, filtros avançados de busca e conta com um sistema de autenticação e permissões de usuários (Comum e Administrador).
-##### 🤖 Observação: Criado com auxilio do copilot no VSCode
 
 ## 🚀 Funcionalidades
 
@@ -10,11 +8,13 @@ Autenticação Segura: Registro e login de usuários com senhas criptografadas (
 
 Controle de Acesso: Diferenciação entre usuários comuns (que podem editar/excluir apenas os próprios registros) e administradores (com controle total).
 
-Gestão de Programação (CRUD): Adicionar, visualizar, editar e excluir agendamentos de técnicos, indicando se a atividade será em campo ou no escritório. A listagem também pode ser filtrada pelo tipo de atividade.
+Gestão de Programação (CRUD): Adicionar, visualizar, editar e excluir agendamentos de técnicos, indicando se a atividade será em campo ou no escritório e informando o local da atividade. A listagem também pode ser filtrada pelo tipo de atividade.
 
-Planilha mensal: Administradores podem selecionar qualquer usuário, inclusive a própria conta, e um mês para baixar a programação em formato Excel.
+Relatórios mensais: Administradores podem selecionar qualquer usuário e mês para baixar a programação em Excel ou gerar um relatório Word somente com as atividades do tipo Campo, usando o modelo `modelo_programacao.docx`.
 
-Perfil do usuário: Cadastro de nome completo, matrícula da empresa, escritório e e-mail. Nome, matrícula e escritório são preenchidos automaticamente nas novas programações.
+Perfil do usuário: Cadastro de nome completo, matrícula da empresa, escritório, tipo de vínculo (Efetivo, Bolsista ou Cedido) e e-mail. Nome, matrícula e escritório são preenchidos automaticamente nas novas programações.
+
+Privacidade da programação: cada usuário visualiza somente seus próprios registros; administradores visualizam todas as programações.
 
 Configurações da conta: Usuários podem atualizar o nome, matrícula, escritório, e-mail e nome de usuário, além de trocar a senha informando a senha atual.
 
@@ -148,4 +148,3 @@ gunicorn --bind 0.0.0.0:$PORT app:app
 ### Observação importante
 
 O SQLite é adequado para desenvolvimento local, mas não é recomendado como banco primário em produção em nuvem, pois arquivos locais podem ser apagados ou reinicializados entre deploys.
-
